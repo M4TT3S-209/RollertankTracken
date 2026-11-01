@@ -136,22 +136,24 @@ const $ = (sel, root = document) => root.querySelector(sel);
 const navbar = $('#navbar');
 
 function renderTabbar() {
-  $('#tabbar').innerHTML = TABS.map((t) => `
+  $('#tabbar').innerHTML = `<span class="tab-indicator" aria-hidden="true"></span>${TABS.map((t) => `
     <button class="tab" role="tab" data-tab-btn="${t.id}" aria-selected="${t.id === currentTab}">
       ${icon(t.icon)}<span>${t.title}</span>
-    </button>`).join('');
+    </button>`).join('')}`;
+  $('#fab').innerHTML = icon('plus');
+}
+
+function fabTarget() {
+  return currentTab === 'history' && historyMode === 'oil' ? 'oil' : 'fuel';
 }
 
 function renderNavbar() {
   const t = TABS.find((x) => x.id === currentTab);
   $('#navbar-title').textContent = t.title;
-  let actions = '';
-  if (currentTab === 'tank' || (currentTab === 'history' && historyMode === 'fuel')) {
-    actions = `<button class="nav-btn" data-action="add-fill" aria-label="Tankung eintragen">${icon('plus')}</button>`;
-  } else if (currentTab === 'history') {
-    actions = `<button class="nav-btn" data-action="add-oil" aria-label="Öl eintragen">${icon('plus')}</button>`;
-  }
-  $('#navbar-actions').innerHTML = actions;
+  $('#tabbar').style.setProperty('--tab-index', String(TABS.indexOf(t)));
+  const fab = $('#fab');
+  fab.hidden = currentTab === 'settings';
+  fab.setAttribute('aria-label', fabTarget() === 'oil' ? 'Öl eintragen' : 'Tankung eintragen');
 }
 
 function switchTab(id) {
@@ -160,16 +162,32 @@ function switchTab(id) {
   document.querySelectorAll('.view').forEach((v) => v.classList.toggle('active', v.id === `view-${id}`));
   document.querySelectorAll('[data-tab-btn]').forEach((b) => b.setAttribute('aria-selected', String(b.dataset.tabBtn === id)));
   window.scrollTo(0, 0);
+  lastScrollY = 0;
   renderNavbar();
   renderView();
   onScroll();
 }
 
+let lastScrollY = 0;
 function onScroll() {
-  navbar.classList.toggle('scrolled', window.scrollY > 34);
+  const y = window.scrollY;
+  navbar.classList.toggle('scrolled', y > 34);
+  const bar = $('#tabbar-wrap');
+  const dy = y - lastScrollY;
+  const atBottom = window.innerHeight + y >= document.documentElement.scrollHeight - 4;
+  if (y < 60 || dy < -8 || atBottom) bar.classList.remove('compact');
+  else if (dy > 8) bar.classList.add('compact');
+  if (Math.abs(dy) > 8 || y < 60) lastScrollY = y;
+}
+
+function updateAmbient() {
+  const lv = A.status ? A.status.level : null;
+  const color = lv === 'reserve' ? 'var(--red)' : lv === 'low' ? 'var(--orange)' : lv === 'ok' ? 'var(--green)' : 'var(--teal)';
+  document.documentElement.style.setProperty('--ambient-level', color);
 }
 
 function renderView() {
+  updateAmbient();
   const el = $(`#view-${currentTab}`);
   if (currentTab === 'tank') {
     el.innerHTML = viewTank();
@@ -194,7 +212,7 @@ const LEVEL = {
   reserve: { color: 'var(--red)', icon: 'warning', text: 'Reserve – jetzt tanken' },
 };
 
-const G = { size: 240, r: 100, stroke: 18 };
+const G = { size: 240, r: 100, stroke: 20 };
 const G_CIRC = 2 * Math.PI * G.r;
 const G_ARC = G_CIRC * 0.75;
 
@@ -211,12 +229,15 @@ function gaugeSvg(reserveShare) {
   <svg viewBox="0 0 ${G.size} ${G.size}" aria-hidden="true">
     <defs>
       <linearGradient id="g-level" x1="0" y1="1" x2="1" y2="0">
-        <stop offset="0" style="stop-color: color-mix(in srgb, var(--level) 70%, white)"/>
+        <stop offset="0" style="stop-color: color-mix(in srgb, var(--level) 62%, white)"/>
         <stop offset="1" style="stop-color: var(--level)"/>
       </linearGradient>
+      <filter id="g-glow" x="-40%" y="-40%" width="180%" height="180%"><feGaussianBlur stdDeviation="9"/></filter>
     </defs>
     <circle class="track" cx="${c}" cy="${c}" r="${G.r}" fill="none" stroke-width="${G.stroke}" stroke-linecap="round"
       stroke-dasharray="${G_ARC} ${G_CIRC}" transform="rotate(135 ${c} ${c})"/>
+    <circle class="value glow" cx="${c}" cy="${c}" r="${G.r}" fill="none" stroke="var(--level)" stroke-width="${G.stroke}" stroke-linecap="round"
+      stroke-dasharray="${G_ARC} ${G_CIRC}" stroke-dashoffset="${G_ARC}" transform="rotate(135 ${c} ${c})" filter="url(#g-glow)"/>
     <circle class="value" cx="${c}" cy="${c}" r="${G.r}" fill="none" stroke="url(#g-level)" stroke-width="${G.stroke}" stroke-linecap="round"
       stroke-dasharray="${G_ARC} ${G_CIRC}" stroke-dashoffset="${G_ARC}" transform="rotate(135 ${c} ${c})"/>
     ${tick}
@@ -230,18 +251,18 @@ let shown = { range: null, percent: null };
 function animateTank(el) {
   const st = A.status;
   if (!st) return;
-  const value = el.querySelector('.gauge .value');
+  const values = [...el.querySelectorAll('.gauge .value')];
   const num = el.querySelector('[data-count]');
   const meters = [...el.querySelectorAll('.meter > span')];
   const targetOffset = G_ARC * (1 - st.percent);
-  if (value) {
+  values.forEach((value) => {
     const from = shown.percent == null ? 0 : shown.percent;
     value.style.transition = 'none';
     value.setAttribute('stroke-dashoffset', String(G_ARC * (1 - from)));
     value.getBoundingClientRect();
     value.style.transition = '';
     requestAnimationFrame(() => value.setAttribute('stroke-dashoffset', String(targetOffset)));
-  }
+  });
   meters.forEach((meter) => {
     const w = meter.style.width;
     meter.style.width = '0%';
@@ -472,7 +493,8 @@ function tile(ic, bg, label, value, sub) {
 /* ========================================================================== */
 
 function segmented() {
-  return `<div class="segmented" role="tablist" aria-label="Verlauf anzeigen">
+  return `<div class="segmented" id="history-seg" data-active="${historyMode}" role="tablist" aria-label="Verlauf anzeigen">
+    <span class="seg-thumb" aria-hidden="true"></span>
     <button role="tab" data-action="history-mode" data-mode="fuel" aria-selected="${historyMode === 'fuel'}">Benzin</button>
     <button role="tab" data-action="history-mode" data-mode="oil" aria-selected="${historyMode === 'oil'}">2-Takt-Öl</button>
   </div>`;
@@ -808,9 +830,9 @@ function openSheet(opts) {
   lastFocus = document.activeElement;
   sheet.innerHTML = `
     <div class="sheet-head">
-      ${opts.left === false ? '<span></span>' : `<button class="nav-btn" data-sheet="left">${esc(opts.left || 'Abbrechen')}</button>`}
+      ${opts.left === false ? '<span></span>' : `<button class="glass-btn" data-sheet="left" aria-label="${esc(opts.left || 'Abbrechen')}">${icon('close')}</button>`}
       <div class="sheet-title" id="sheet-title">${esc(opts.title)}</div>
-      ${opts.right ? `<button class="nav-btn" data-sheet="right">${esc(opts.right)}</button>` : '<span></span>'}
+      ${opts.right ? `<button class="glass-btn prominent" data-sheet="right" aria-label="${esc(opts.right)}">${icon('check')}</button>` : '<span></span>'}
     </div>
     <div class="sheet-body">${opts.body}</div>`;
   sheet.setAttribute('aria-labelledby', 'sheet-title');
@@ -1225,8 +1247,8 @@ function confirmAction({ message, confirmLabel, destructive = true }) {
     const as = document.createElement('div');
     as.className = 'action-sheet';
     as.setAttribute('role', 'alertdialog');
-    as.innerHTML = `<div class="as-group"><div class="as-msg"></div><button class="${destructive ? 'destructive' : ''}" data-r="1"></button></div>
-      <div class="as-group"><button class="cancel" data-r="0">Abbrechen</button></div>`;
+    as.innerHTML = `<div class="as-group"><div class="as-msg"></div><button class="${destructive ? 'destructive' : ''}" data-r="1"></button>
+      <button class="cancel" data-r="0">Abbrechen</button></div>`;
     as.querySelector('.as-msg').textContent = message;
     as.querySelector('[data-r="1"]').textContent = confirmLabel;
     document.body.append(bd, as);
@@ -1395,10 +1417,24 @@ async function handleAction(el) {
       if (e) openOilSheet(e);
       break;
     }
-    case 'history-mode':
+    case 'history-mode': {
+      const prev = historyMode;
       historyMode = el.dataset.mode === 'oil' ? 'oil' : 'fuel';
+      if (prev === historyMode) break;
       renderNavbar();
       renderView();
+      // Kapsel vom alten zum neuen Segment gleiten lassen
+      const seg = $('#history-seg');
+      if (seg) {
+        seg.dataset.active = prev;
+        seg.getBoundingClientRect();
+        seg.dataset.active = historyMode;
+      }
+      break;
+    }
+    case 'fab':
+      if (fabTarget() === 'oil') openOilSheet();
+      else openFillSheet();
       break;
     case 'goto':
       switchTab(el.dataset.tab);

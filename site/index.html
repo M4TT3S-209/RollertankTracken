@@ -10,8 +10,8 @@
   <meta name="apple-mobile-web-app-status-bar-style" content="default">
   <meta name="apple-mobile-web-app-title" content="Roller Tank">
   <meta name="format-detection" content="telephone=no">
-  <meta name="theme-color" content="#f2f2f7" media="(prefers-color-scheme: light)">
-  <meta name="theme-color" content="#000000" media="(prefers-color-scheme: dark)">
+  <meta name="theme-color" content="#eef0f5" media="(prefers-color-scheme: light)">
+  <meta name="theme-color" content="#050608" media="(prefers-color-scheme: dark)">
   <title>Roller Tank</title>
   <link rel="manifest" href="manifest.webmanifest">
   <link rel="icon" href="icons/icon.svg" type="image/svg+xml">
@@ -20,6 +20,8 @@
   <script type="module" src="js/app.js"></script>
 </head>
 <body>
+  <div class="ambient" aria-hidden="true"><i class="blob b1"></i><i class="blob b2"></i><i class="blob b3"></i></div>
+
   <header class="navbar" id="navbar">
     <div class="navbar-title" id="navbar-title">Tank</div>
     <div class="navbar-actions" id="navbar-actions"></div>
@@ -32,8 +34,9 @@
     <section class="view" id="view-settings" aria-label="Einstellungen"></section>
   </main>
 
-  <nav class="tabbar" aria-label="Hauptnavigation">
-    <div class="tabbar-inner" role="tablist" id="tabbar"></div>
+  <nav class="tabbar" id="tabbar-wrap" aria-label="Hauptnavigation">
+    <div class="tabbar-inner glass-chrome" role="tablist" id="tabbar"></div>
+    <button class="fab" id="fab" data-action="fab" aria-label="Tankung eintragen"></button>
   </nav>
 
   <div class="backdrop" id="backdrop"></div>
