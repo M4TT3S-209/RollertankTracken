@@ -29,6 +29,8 @@
   --indigo: #5856d6;
   --purple: #af52de;
   --yellow: #ffcc00;
+  --brown: #a2845e;
+  --seg-selected: #ffffff;
 
   /* Diagramme (validiert: CVD-sicher, ≥ 3:1 Kontrast) */
   --series-1: #007aff;
@@ -71,6 +73,8 @@
     --indigo: #5e5ce6;
     --purple: #bf5af2;
     --yellow: #ffd60a;
+    --brown: #ac8e68;
+    --seg-selected: #636366;
 
     --series-1: #0a84ff;
     --series-2: #e0700a;
@@ -586,6 +590,9 @@ main {
 .model-head .tile-icon {
   width: 36px;
   height: 36px;
+}
+
+.model-card .model-head .tile-icon {
   background: linear-gradient(135deg, var(--indigo), var(--purple));
 }
 
@@ -717,6 +724,79 @@ main {
 .bg-indigo { background: var(--indigo); }
 .bg-purple { background: var(--purple); }
 .bg-gray { background: #8e8e93; }
+.bg-brown { background: var(--brown); }
+
+/* 2-Takt-Öl */
+.oil-card {
+  padding: 16px 18px;
+  margin-top: 14px;
+}
+
+.oil-card .tile-icon {
+  width: 36px;
+  height: 36px;
+}
+
+.oil-card .tile-icon .ico {
+  width: 22px;
+  height: 22px;
+}
+
+.oil-intro {
+  margin: 12px 0 14px;
+}
+
+.meter.level {
+  background: color-mix(in srgb, var(--level, var(--green)) 16%, transparent);
+}
+
+.meter.level > span {
+  background: var(--level, var(--green));
+}
+
+.model-pct small {
+  font-family: var(--font);
+  font-size: 15px;
+  font-weight: 600;
+  color: var(--label-2);
+}
+
+.btn-sm {
+  min-height: 44px;
+  font-size: 16px;
+  border-radius: 12px;
+}
+
+.welcome-art.oil {
+  background: linear-gradient(145deg, #c9a46e, #8a6a43);
+  box-shadow: 0 10px 30px color-mix(in srgb, #a2845e 40%, transparent);
+}
+
+/* Segment-Umschalter (iOS) */
+.segmented {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 2px;
+  padding: 2px;
+  margin: 2px 0 8px;
+  border-radius: 9px;
+  background: var(--fill-3);
+}
+
+.segmented button {
+  height: 32px;
+  border-radius: 7px;
+  font-size: 13px;
+  font-weight: 500;
+  letter-spacing: -0.08px;
+  transition: background-color 0.2s, box-shadow 0.2s;
+}
+
+.segmented button[aria-selected="true"] {
+  background: var(--seg-selected);
+  font-weight: 600;
+  box-shadow: 0 3px 8px rgba(0, 0, 0, 0.12), 0 3px 1px rgba(0, 0, 0, 0.04);
+}
 
 /* Banner */
 .banner {

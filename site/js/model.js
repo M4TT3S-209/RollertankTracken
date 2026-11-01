@@ -21,6 +21,11 @@ export const DEFAULT_SETTINGS = Object.freeze({
   tankCapacity: 7, // Liter
   reserveLiters: 1, // ab dieser Restmenge wird gewarnt
   priorConsumption: 3.0, // L/100 km – typischer Startwert für 50er-2-Takter
+  // 2-Takt-Öl (Getrenntschmierung: Pumpe mischt das Öl automatisch bei)
+  oilCapacity: 1.2, // Liter Öltank (Honda Bali)
+  oilReserve: 0.3, // ab dieser geschätzten Restmenge: nachfüllen
+  oilCheckInterval: 500, // km – Erinnerung zum Kontrollieren
+  oilRatio: 50, // Startwert Mischverhältnis 1:50 (Pumpe ca. 1:40–1:50)
 });
 
 export const MODEL = Object.freeze({
@@ -440,9 +445,12 @@ export function analyze(data) {
   const worst = regular.length ? regular.reduce((a, s) => (s.consumption > a.consumption ? s : a)) : null;
   const avgKmPerTank = segments.length ? totalKm / segments.length : null;
 
+  const oil = analyzeOil(data.oil || [], settings, estimate, status ? status.odometer : null);
+
   const insights = buildInsights({
     settings, segments, estimate, status, perDay, avgLeftover, maxFill, learning, trend, history, outlierIds,
   });
+  if (oil.insight) insights.push(oil.insight);
 
   return {
     settings,
@@ -469,7 +477,110 @@ export function analyze(data) {
     learning,
     trend,
     insights,
+    oil,
   };
+}
+
+/* ------------------------------------------------------------------ */
+/* 2-Takt-Öl                                                            */
+/* ------------------------------------------------------------------ */
+
+/**
+ * Gleiches Prinzip wie beim Benzin: Wird der Öltank bis zur Markierung
+ * aufgefüllt, entspricht die eingefüllte Menge dem Verbrauch seit dem letzten
+ * Auffüllen. Daraus lernt das Modell den Ölverbrauch (ml/100 km). Bis genug
+ * Messungen da sind, wird er aus dem Benzinverbrauch und dem Mischverhältnis
+ * der Ölpumpe abgeleitet (Startwert 1:50).
+ *
+ * Einträge: { id, date, odometer, liters (≥ 0), full }
+ *   full = true  → bis zur Markierung aufgefüllt
+ *   full = false → Teil-Nachfüllung bzw. nur kontrolliert (liters = 0)
+ */
+export function analyzeOil(events, settings, fuelEstimate, fuelOdometer) {
+  const s = { ...DEFAULT_SETTINGS, ...settings };
+  const valid = sortFillUps(
+    events.filter((e) => Number.isFinite(e.odometer) && Number.isFinite(e.liters) && e.liters >= 0),
+  );
+  const ratio = s.oilRatio > 0 ? s.oilRatio : DEFAULT_SETTINGS.oilRatio;
+  const priorMl = (fuelEstimate.mean * 1000) / ratio; // ml pro 100 km
+  // Segmente in ml/100 km, damit die Schätzfunktion mit sinnvollen Größenordnungen arbeitet.
+  const segments = buildSegments(valid).map((seg) => ({ ...seg, consumption: seg.consumption * 1000 }));
+  const estimate = estimateConsumption(segments, { priorConsumption: priorMl });
+  const perKm = estimate.mean / 100000; // Liter pro km
+  const tankRange = s.oilCapacity / perKm;
+  const learnedRatio = (fuelEstimate.mean * 1000) / estimate.mean;
+
+  const base = {
+    events: valid,
+    segments,
+    estimate,
+    mlPer100: estimate.mean,
+    litersPer1000: estimate.mean / 100,
+    tankRange,
+    ratio: learnedRatio,
+    ratioLearned: estimate.n > 0,
+    status: null,
+    insight: null,
+  };
+  if (!valid.length) return base;
+
+  const lastEvent = valid[valid.length - 1];
+  const odometer = Math.max(fuelOdometer ?? -Infinity, lastEvent.odometer);
+  const oilSettings = { tankCapacity: s.oilCapacity };
+  const mid = fuelAt(valid, oilSettings, estimate.mean / 1000, odometer);
+  if (!mid) return base; // noch nie bis zur Markierung aufgefüllt
+
+  const pessimistic = fuelAt(valid, oilSettings, estimate.high / 1000, odometer);
+  const reserve = Math.min(s.oilReserve, s.oilCapacity);
+  const level = mid.fuel;
+  const kmToReserve = Math.max(0, (level - reserve) / perKm);
+  const kmToReserveSafe = Math.max(0, (pessimistic.fuel - reserve) / (estimate.high / 100000));
+  const kmSinceEvent = odometer - lastEvent.odometer;
+  const kmToCheck = s.oilCheckInterval - kmSinceEvent;
+  const refillAt = odometer + kmToReserveSafe;
+  const checkAt = lastEvent.odometer + s.oilCheckInterval;
+
+  let state = 'ok';
+  if (level <= reserve + 1e-9) state = 'refill';
+  else if (kmToCheck <= 0) state = 'check';
+  else if (kmToReserveSafe < 150) state = 'soon';
+
+  base.status = {
+    odometer,
+    level,
+    levelLow: pessimistic.fuel,
+    percent: clamp(level / s.oilCapacity, 0, 1),
+    reserve,
+    kmToReserve,
+    kmToReserveSafe,
+    refillAt,
+    checkAt,
+    kmToCheck,
+    kmSinceEvent,
+    kmSinceFull: mid.kmSinceFull,
+    lastEvent,
+    nextAt: Math.min(refillAt, checkAt),
+    state,
+  };
+
+  if (state === 'refill' || state === 'check') {
+    base.insight = {
+      icon: 'oil',
+      tone: state === 'refill' ? 'red' : 'orange',
+      title: state === 'refill' ? '2-Takt-Öl nachfüllen' : '2-Takt-Öl kontrollieren',
+      text: state === 'refill'
+        ? `Im Öltank sind geschätzt nur noch ${fmt(level, 2)} L. Ohne Öl droht ein Kolbenfresser – bitte bald nachfüllen.`
+        : `Seit der letzten Kontrolle bist du ${fmt(kmSinceEvent, 0)} km gefahren. Ein kurzer Blick in den Öltank lohnt sich.`,
+    };
+  } else if (estimate.n > 0) {
+    base.insight = {
+      icon: 'oil',
+      tone: 'blue',
+      title: 'Ölverbrauch gelernt',
+      text: `Dein Roller braucht ca. ${fmt(estimate.mean, 0)} ml Öl pro 100 km – die Pumpe mischt also etwa 1:${fmt(learnedRatio, 0)}. Ein voller Öltank (${fmt(s.oilCapacity)} L) reicht für rund ${fmt(tankRange, 0)} km.`,
+    };
+  }
+  return base;
 }
 
 function buildInsights(ctx) {

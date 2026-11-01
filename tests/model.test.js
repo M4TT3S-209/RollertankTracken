@@ -173,3 +173,69 @@ test('Kosten pro 100 km', () => {
   assert.ok(Math.abs(a.stats.pricePerLiter - 1.9) < 1e-9);
   assert.ok(a.stats.costPer100 > 0);
 });
+
+/* ---------------- 2-Takt-Öl ---------------- */
+
+const oilEv = (date, odometer, liters, full = true) => ({ id: `o${++id}`, date, odometer, liters, full });
+
+test('Öl: ohne Einträge kein Status, Startwert aus Benzinverbrauch und 1:50', () => {
+  const a = analyze({ settings: S, fillUps: [fill('2026-05-01', 2000, 6)], oil: [] });
+  assert.equal(a.oil.status, null);
+  assert.ok(Math.abs(a.oil.mlPer100 - (a.estimate.mean * 1000) / 50) < 1e-9);
+  assert.equal(a.oil.ratioLearned, false);
+});
+
+test('Öl: Füllstand sinkt mit gefahrenen km, Kontrolle nach Intervall fällig', () => {
+  const data = {
+    settings: S,
+    fillUps: [fill('2026-05-01', 2000, 6), fill('2026-05-08', 2150, 4.5)],
+    oil: [oilEv('2026-05-01', 2000, 0.2)],
+    reading: { odometer: 2550, date: '2026-05-20' },
+  };
+  const a = analyze(data);
+  const o = a.oil;
+  assert.ok(o.status);
+  assert.equal(o.status.kmSinceEvent, 550);
+  const used = (o.mlPer100 / 1000) * 5.5;
+  assert.ok(Math.abs(o.status.level - (1.2 - used)) < 1e-9);
+  assert.equal(o.status.state, 'check');
+  assert.ok(o.status.refillAt > 2550);
+});
+
+test('Öl: lernt den echten Verbrauch und das Mischverhältnis', () => {
+  const oil = [oilEv('2026-01-01', 1000, 0.5)];
+  let odo = 1000;
+  for (let i = 0; i < 6; i += 1) {
+    odo += 500;
+    oil.push(oilEv(`2026-0${i + 2}-01`, odo, 0.4)); // 80 ml/100 km
+  }
+  const a = analyze({ settings: S, fillUps: [fill('2026-01-01', 1000, 6), fill('2026-01-08', 1150, 4.5)], oil });
+  assert.ok(Math.abs(a.oil.mlPer100 - 80) < 4, `ml ${a.oil.mlPer100}`);
+  assert.equal(a.oil.ratioLearned, true);
+  assert.ok(Math.abs(a.oil.tankRange - 1500) < 90, `range ${a.oil.tankRange}`);
+});
+
+test('Öl: „nur kontrolliert“ (0 L, nicht voll) setzt das Prüf-Intervall zurück, ändert den Füllstand nicht', () => {
+  const base = {
+    settings: S,
+    fillUps: [fill('2026-05-01', 2000, 6)],
+    oil: [oilEv('2026-05-01', 2000, 0.3)],
+    reading: { odometer: 2600, date: '2026-05-20' },
+  };
+  const before = analyze(base).oil.status;
+  const after = analyze({ ...base, oil: [...base.oil, oilEv('2026-05-20', 2600, 0, false)] }).oil.status;
+  assert.equal(before.state, 'check');
+  assert.notEqual(after.state, 'check');
+  assert.ok(Math.abs(after.level - before.level) < 1e-9);
+});
+
+test('Öl: Reserve erreicht → nachfüllen', () => {
+  const a = analyze({
+    settings: S,
+    fillUps: [fill('2026-05-01', 2000, 6)],
+    oil: [oilEv('2026-05-01', 2000, 0.3), oilEv('2026-06-01', 3400, 0, false)],
+    reading: { odometer: 3500, date: '2026-06-03' },
+  });
+  assert.equal(a.oil.status.state, 'refill');
+  assert.ok(a.insights.some((i) => i.title === '2-Takt-Öl nachfüllen'));
+});

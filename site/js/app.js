@@ -65,10 +65,23 @@ function cleanFill(f) {
   return out;
 }
 
+function cleanOil(e) {
+  return {
+    id: String(e.id || uid()),
+    date: /^\d{4}-\d{2}-\d{2}$/.test(e.date) ? e.date : todayISO(),
+    odometer: Number(e.odometer),
+    liters: Number(e.liters),
+    full: e.full !== false,
+  };
+}
+
 function normalize(d = {}) {
   const settings = { ...DEFAULT_SETTINGS, ...(d.settings || {}) };
   const fillUps = Array.isArray(d.fillUps)
     ? d.fillUps.map(cleanFill).filter((f) => Number.isFinite(f.odometer) && f.odometer >= 0 && Number.isFinite(f.liters) && f.liters > 0)
+    : [];
+  const oil = Array.isArray(d.oil)
+    ? d.oil.map(cleanOil).filter((e) => Number.isFinite(e.odometer) && e.odometer >= 0 && Number.isFinite(e.liters) && e.liters >= 0)
     : [];
   const reading = d.reading && Number.isFinite(Number(d.reading.odometer))
     ? { odometer: Number(d.reading.odometer), date: d.reading.date || todayISO() }
@@ -77,6 +90,7 @@ function normalize(d = {}) {
     version: 1,
     settings,
     fillUps,
+    oil,
     reading,
     demo: !!d.demo,
     ui: { installDismissed: !!(d.ui && d.ui.installDismissed) },
@@ -116,6 +130,7 @@ const TABS = [
   { id: 'settings', title: 'Einstellungen', icon: 'gear' },
 ];
 let currentTab = 'tank';
+let historyMode = 'fuel';
 
 const $ = (sel, root = document) => root.querySelector(sel);
 const navbar = $('#navbar');
@@ -130,9 +145,12 @@ function renderTabbar() {
 function renderNavbar() {
   const t = TABS.find((x) => x.id === currentTab);
   $('#navbar-title').textContent = t.title;
-  const actions = currentTab === 'tank' || currentTab === 'history'
-    ? `<button class="nav-btn" data-action="add-fill" aria-label="Tankung eintragen">${icon('plus')}</button>`
-    : '';
+  let actions = '';
+  if (currentTab === 'tank' || (currentTab === 'history' && historyMode === 'fuel')) {
+    actions = `<button class="nav-btn" data-action="add-fill" aria-label="Tankung eintragen">${icon('plus')}</button>`;
+  } else if (currentTab === 'history') {
+    actions = `<button class="nav-btn" data-action="add-oil" aria-label="Öl eintragen">${icon('plus')}</button>`;
+  }
   $('#navbar-actions').innerHTML = actions;
 }
 
@@ -214,7 +232,7 @@ function animateTank(el) {
   if (!st) return;
   const value = el.querySelector('.gauge .value');
   const num = el.querySelector('[data-count]');
-  const meter = el.querySelector('.meter > span');
+  const meters = [...el.querySelectorAll('.meter > span')];
   const targetOffset = G_ARC * (1 - st.percent);
   if (value) {
     const from = shown.percent == null ? 0 : shown.percent;
@@ -224,11 +242,11 @@ function animateTank(el) {
     value.style.transition = '';
     requestAnimationFrame(() => value.setAttribute('stroke-dashoffset', String(targetOffset)));
   }
-  if (meter) {
+  meters.forEach((meter) => {
     const w = meter.style.width;
     meter.style.width = '0%';
     requestAnimationFrame(() => requestAnimationFrame(() => { meter.style.width = w; }));
-  }
+  });
   if (num) {
     const to = Math.round(st.range);
     const from = shown.range == null ? 0 : shown.range;
@@ -362,6 +380,8 @@ function viewTank() {
     </div>`;
   }
 
+  h += oilCard();
+
   // Modell-Karte
   const pct = Math.round(e.confidence * 100);
   const halfWidth = (st.fullRangeHigh - st.fullRangeLow) / 2;
@@ -399,6 +419,46 @@ function viewTank() {
   return h;
 }
 
+const OIL_STATE = {
+  ok: { color: 'var(--green)', text: 'Alles im grünen Bereich' },
+  soon: { color: 'var(--orange)', text: 'Bald nachfüllen' },
+  check: { color: 'var(--orange)', text: 'Kontrolle fällig' },
+  refill: { color: 'var(--red)', text: 'Jetzt nachfüllen!' },
+};
+
+function oilCard() {
+  const o = A.oil;
+  const s = A.settings;
+  if (!o.status) {
+    return `
+    <div class="card oil-card">
+      <div class="model-head"><div class="tile-icon bg-brown">${icon('oil')}</div>
+        <div><div class="model-title">2-Takt-Öl</div><div class="model-sub">Noch nicht erfasst</div></div></div>
+      <div class="model-foot oil-intro">Fülle den Öltank einmal bis zur Markierung auf und trag es ein. Dann behält die App den Ölstand im Blick und erinnert dich alle ${fKm(s.oilCheckInterval)} km ans Kontrollieren.</div>
+      <button class="btn btn-tinted btn-block btn-sm" data-action="add-oil">${icon('oil')}Öl eintragen</button>
+    </div>`;
+  }
+  const st = o.status;
+  const lv = OIL_STATE[st.state];
+  let foot;
+  if (st.state === 'refill') {
+    foot = `Geschätzt nur noch <strong>${nf(st.level, 2, 2)} L</strong> im Öltank. Bitte nachfüllen – ohne Öl droht ein Kolbenfresser.`;
+  } else if (st.state === 'check') {
+    foot = `Seit dem letzten Eintrag <strong>${fKm(st.kmSinceEvent)} km</strong> gefahren – kurz in den Öltank schauen.`;
+  } else {
+    foot = `Nachfüllen spätestens bei <strong>km ${fOdo(Math.floor(st.refillAt / 10) * 10)}</strong> · nächste Kontrolle in ${fKm(Math.max(0, st.kmToCheck))} km`;
+  }
+  return `
+  <div class="card oil-card" style="--level:${lv.color}">
+    <div class="model-head"><div class="tile-icon bg-brown">${icon('oil')}</div>
+      <div><div class="model-title">2-Takt-Öl</div><div class="model-sub">${lv.text}</div></div>
+      <div class="model-pct">${nf(st.level, 1, 1)}<small> L</small></div></div>
+    <div class="meter level" aria-hidden="true"><span style="width:${Math.max(3, Math.round(st.percent * 100))}%"></span></div>
+    <div class="model-foot">${foot}</div>
+    <button class="btn btn-tinted btn-block btn-sm" data-action="add-oil" style="margin-top:14px">${icon('oil')}Öl eintragen</button>
+  </div>`;
+}
+
 function tile(ic, bg, label, value, sub) {
   return `<div class="card tile">
     <div class="tile-head"><span class="tile-icon ${bg}">${icon(ic)}</span>${label}</div>
@@ -411,10 +471,18 @@ function tile(ic, bg, label, value, sub) {
 /* Ansicht: Verlauf                                                           */
 /* ========================================================================== */
 
+function segmented() {
+  return `<div class="segmented" role="tablist" aria-label="Verlauf anzeigen">
+    <button role="tab" data-action="history-mode" data-mode="fuel" aria-selected="${historyMode === 'fuel'}">Benzin</button>
+    <button role="tab" data-action="history-mode" data-mode="oil" aria-selected="${historyMode === 'oil'}">2-Takt-Öl</button>
+  </div>`;
+}
+
 function viewHistory() {
+  if (historyMode === 'oil') return viewOilHistory();
   const n = A.fillUps.length;
   let h = `<h1 class="large-title">Verlauf</h1>
-    <p class="subtitle">${n} ${n === 1 ? 'Tankung' : 'Tankungen'}${A.stats.totalKm ? ` · ${fKm(A.stats.totalKm)} km ausgewertet` : ''}</p>`;
+    <p class="subtitle">${n} ${n === 1 ? 'Tankung' : 'Tankungen'}${A.stats.totalKm ? ` · ${fKm(A.stats.totalKm)} km ausgewertet` : ''}</p>${segmented()}`;
   if (!n) {
     return `${h}<section class="card welcome">
       <div class="welcome-art">${icon('list')}</div>
@@ -471,6 +539,46 @@ function viewHistory() {
     h += '</div>';
   }
   h += `<p class="section-footer">Tippe auf eine Tankung, um sie zu bearbeiten oder zu löschen. Der Verbrauch wird immer von Volltankung zu Volltankung gemessen.</p>`;
+  return h;
+}
+
+function viewOilHistory() {
+  const o = A.oil;
+  const n = o.events.length;
+  let h = `<h1 class="large-title">Verlauf</h1>
+    <p class="subtitle">${n} ${n === 1 ? 'Öl-Eintrag' : 'Öl-Einträge'}${o.ratioLearned ? ` · ca. ${fKm(o.mlPer100)} ml/100 km` : ''}</p>${segmented()}`;
+  if (!n) {
+    return `${h}<section class="card welcome">
+      <div class="welcome-art oil">${icon('oil')}</div>
+      <h2>Noch kein Öl</h2>
+      <p>Trag ein, wenn du 2-Takt-Öl nachfüllst oder den Ölstand kontrollierst. Die App lernt daraus deinen Ölverbrauch.</p>
+      <button class="btn btn-primary btn-block" data-action="add-oil">${icon('oil')} Öl eintragen</button>
+    </section>`;
+  }
+  const segById = new Map(o.segments.map((sg) => [sg.id, sg]));
+  const firstFullId = (o.events.find((e) => e.full) || {}).id;
+  h += '<div class="list" style="margin-top:8px">';
+  for (const e of [...o.events].reverse()) {
+    const seg = segById.get(e.id);
+    const checkOnly = e.liters === 0 && !e.full;
+    const badges = [];
+    if (!e.full && !checkOnly) badges.push('<span class="badge">Teil</span>');
+    if (e.id === firstFullId) badges.push('<span class="badge blue">Start</span>');
+    const detail = seg
+      ? `<strong>${fKm(seg.consumption)}</strong><span>ml/100 km</span>`
+      : `<span>${checkOnly ? 'kontrolliert' : e.id === firstFullId ? 'Startpunkt' : ''}</span>`;
+    h += `
+    <button class="row" data-action="edit-oil" data-id="${esc(e.id)}" style="--inset:58px">
+      <span class="row-icon round ${checkOnly ? 'bg-gray' : 'bg-brown'}">${icon(checkOnly ? 'check' : 'oil')}</span>
+      <span class="row-main">
+        <span class="row-title"><b>${checkOnly ? 'Kontrolliert' : `${nf(e.liters, 2, 2)} L`}</b>${badges.join('')}</span>
+        <span class="row-sub">${fDate(e.date, { weekday: 'short', day: 'numeric', month: 'short' })} · km ${fOdo(e.odometer)}${seg ? ` · ${fKm(seg.km)} km` : ''}</span>
+      </span>
+      <span class="row-detail">${detail}</span>
+      ${icon('chevron', 'chev')}
+    </button>`;
+  }
+  h += `</div><p class="section-footer">Der Ölverbrauch wird von „bis zur Markierung“ zu „bis zur Markierung“ gemessen – genau wie beim Benzin.</p>`;
   return h;
 }
 
@@ -544,6 +652,21 @@ function viewAnalysis() {
     h += '</div>';
   }
 
+  // 2-Takt-Öl
+  const o = A.oil;
+  h += `<h2 class="section-header big">2-Takt-Öl</h2>
+  <div class="kpis">
+    <div class="card kpi"><div class="kpi-label">Ölverbrauch</div>
+      <div class="kpi-value">${fKm(o.mlPer100)}<small> ml/100 km</small></div>
+      <div class="kpi-sub">≈ ${nf(o.litersPer1000, 2, 2)} L pro 1.000 km</div></div>
+    <div class="card kpi"><div class="kpi-label">Öltank reicht für</div>
+      <div class="kpi-value">${fKm(o.tankRange)}<small> km</small></div>
+      <div class="kpi-sub">Mischung ≈ 1:${fKm(o.ratio)}</div></div>
+  </div>
+  <p class="section-footer">${o.ratioLearned
+    ? `Gelernt aus ${o.estimate.n} ${o.estimate.n === 1 ? 'Messung' : 'Messungen'} (Modellsicherheit ${Math.round(o.estimate.confidence * 100)} %).`
+    : `Noch geschätzt aus deinem Benzinverbrauch und einem Mischverhältnis von 1:${fKm(s.oilRatio)}. Sobald du zweimal bis zur Markierung aufgefüllt und eingetragen hast, lernt die App deinen echten Ölverbrauch.`}</p>`;
+
   // Statistik
   const st = A.stats;
   const rows = [];
@@ -604,6 +727,15 @@ function viewSettings() {
   </div>
   <p class="section-footer">Der Tankinhalt ist die Basis aller Berechnungen. Passt beim Volltanken mehr hinein als eingestellt, weist dich die Analyse darauf hin.</p>
 
+  <div class="section-header">2-Takt-Öl</div>
+  <div class="list">
+    <div class="field"><label for="s-oilcap">Öltank</label><input id="s-oilcap" type="text" inputmode="decimal" data-setting="oilCapacity" data-num="0.2,5" value="${inputNum(s.oilCapacity)}"><span class="unit">L</span></div>
+    <div class="field"><label for="s-oilres">Nachfüllen ab</label><input id="s-oilres" type="text" inputmode="decimal" data-setting="oilReserve" data-num="0,2" value="${inputNum(s.oilReserve)}"><span class="unit">L</span></div>
+    <div class="field"><label for="s-oilchk">Kontrolle alle</label><input id="s-oilchk" type="text" inputmode="decimal" data-setting="oilCheckInterval" data-num="50,5000" value="${inputNum(s.oilCheckInterval)}"><span class="unit">km</span></div>
+    <div class="field"><label for="s-oilratio">Mischung 1 :</label><input id="s-oilratio" type="text" inputmode="decimal" data-setting="oilRatio" data-num="10,200" value="${inputNum(s.oilRatio)}"></div>
+  </div>
+  <p class="section-footer">Honda Bali: ca. 1,2 L Öltank, die Ölpumpe mischt ungefähr 1:40 bis 1:50. Das Mischverhältnis ist nur der Startwert – nach zweimal Auffüllen bis zur Markierung lernt die App deinen echten Ölverbrauch.</p>
+
   <div class="section-header">Lernmodell</div>
   <div class="list">
     <div class="field"><label for="s-prior">Startwert</label><input id="s-prior" type="text" inputmode="decimal" data-setting="priorConsumption" data-num="0.5,15" value="${inputNum(s.priorConsumption)}"><span class="unit">L/100 km</span></div>
@@ -639,6 +771,11 @@ function onSettingChange(input) {
     if (!Number.isFinite(value) || value < lo || value > hi) {
       input.value = inputNum(data.settings[key]);
       toast(`Bitte einen Wert zwischen ${nf(lo, 0, 1)} und ${nf(hi, 0, 1)} eingeben`, 'warning');
+      return;
+    }
+    if (key === 'oilReserve' && value >= data.settings.oilCapacity) {
+      input.value = inputNum(data.settings[key]);
+      toast('Muss kleiner als der Öltank sein', 'warning');
       return;
     }
     if (key === 'reserveLiters' && value >= data.settings.tankCapacity) {
@@ -866,6 +1003,109 @@ function openFillSheet(existing) {
       root.querySelector('#f-full').addEventListener('change', evaluate);
       evaluate();
       if (!isEdit) root.querySelector('#f-odo').focus({ preventScroll: true });
+    },
+  });
+}
+
+/* ---------- 2-Takt-Öl eintragen ---------- */
+
+function knownOdometer() {
+  const odos = [...data.fillUps.map((f) => f.odometer), ...data.oil.map((e) => e.odometer)];
+  if (data.reading) odos.push(data.reading.odometer);
+  return odos.length ? Math.max(...odos) : null;
+}
+
+function openOilSheet(existing) {
+  const isEdit = !!existing;
+  const others = data.oil.filter((e) => !existing || e.id !== existing.id);
+  const known = knownOdometer();
+  const cap = A.settings.oilCapacity;
+  const body = `
+    <div class="list">
+      <div class="field"><label for="o-date">Datum</label><input id="o-date" type="date" value="${esc(existing ? existing.date : todayISO())}"></div>
+      <div class="field"><label for="o-odo">km-Stand</label><input id="o-odo" type="text" inputmode="decimal" autocomplete="off" placeholder="${known != null ? `z. B. ${fOdo(known)}` : 'km'}" value="${existing ? inputNum(existing.odometer) : ''}"><span class="unit">km</span></div>
+      <div class="field"><label for="o-liters">Nachgefüllt</label><input id="o-liters" type="text" inputmode="decimal" autocomplete="off" placeholder="0,00" value="${existing ? inputNum(existing.liters) : ''}"><span class="unit">L</span></div>
+      <label class="field"><span class="field-label">Bis zur Markierung</span><span class="switch"><input id="o-full" type="checkbox" ${!existing || existing.full ? 'checked' : ''}><span></span></span></label>
+    </div>
+    <p class="section-footer">Nur kontrolliert und nichts nachgefüllt? <b>0</b> eintragen und „Bis zur Markierung“ ausschalten – dann startet die Kontroll-Erinnerung neu. 100 ml = 0,1 L.</p>
+    <div class="preview" id="o-preview" aria-live="polite"></div>
+    ${isEdit ? `<button class="btn btn-danger btn-block" data-sheet-action="delete" style="margin-top:28px">${icon('trash')}Eintrag löschen</button>` : ''}`;
+
+  const read = () => ({
+    date: $('#o-date').value || todayISO(),
+    odometer: parseNumber($('#o-odo').value),
+    liters: parseNumber($('#o-liters').value),
+    full: $('#o-full').checked,
+  });
+
+  const evaluate = () => {
+    const v = read();
+    const msgs = [];
+    let ok = Number.isFinite(v.odometer) && v.odometer >= 0 && Number.isFinite(v.liters) && v.liters >= 0;
+    if (Number.isFinite(v.odometer) && others.some((e) => Math.abs(e.odometer - v.odometer) < 0.05)) {
+      msgs.push(['err', 'Für diesen km-Stand gibt es schon einen Öl-Eintrag.']);
+      ok = false;
+    }
+    if (Number.isFinite(v.liters) && v.liters > cap * 1.1) {
+      msgs.push(['warn', `Mehr als der Öltank fasst (${nf(cap, 1, 1)} L) – stimmt die Menge? 100 ml = 0,1 L.`]);
+    }
+    let pv = '';
+    if (Number.isFinite(v.odometer)) {
+      const base = A.oil.estimate;
+      const est = { mean: base.mean / 1000, low: base.low / 1000, high: base.high / 1000 };
+      const ex = expectedFill(others, { tankCapacity: cap }, est, v.odometer);
+      if (!ex) {
+        pv += `<div class="pv-row"><span class="row-icon bg-brown">${icon('oil')}</span><div>${v.full
+          ? '<b>Startpunkt.</b> <span>Ab jetzt behält die App den Ölstand im Blick.</span>'
+          : '<span>Tipp: Für den Start einmal <b>bis zur Markierung</b> auffüllen – sonst kennt die App den Ölstand nicht.</span>'}</div></div>`;
+      } else if (ex.kmSinceFull > 0) {
+        pv += `<div class="pv-row"><span class="row-icon bg-green">${icon('road')}</span><div><b>${fKm(ex.kmSinceFull)} km</b> <span>seit dem letzten Auffüllen</span></div></div>`;
+        pv += `<div class="pv-row"><span class="row-icon bg-indigo">${icon('sparkles')}</span><div><span>Prognose:</span> <b>ca. ${nf(ex.liters, 2, 2)} L</b> <span>passen rein (${nf(ex.litersLow, 2, 2)}–${nf(ex.litersHigh, 2, 2)} L)</span></div></div>`;
+        if (ok && v.full && v.liters > 0) {
+          const ml = (v.liters / ex.kmSinceFull) * 100000;
+          const ratio = (A.estimate.mean * 1000) / ml;
+          pv += `<div class="pv-row"><span class="row-icon bg-brown">${icon('oil')}</span><div><b>${fKm(ml)} ml/100 km</b> <span>seit dem letzten Auffüllen · Mischung ≈ 1:${fKm(ratio)}</span></div></div>`;
+        }
+      }
+    }
+    pv += msgs.map(([cls, text]) => `<div class="pv-msg ${cls}">${esc(text)}</div>`).join('');
+    $('#o-preview').innerHTML = pv;
+    setSaveEnabled(ok);
+    return ok;
+  };
+
+  openSheet({
+    title: isEdit ? 'Öl-Eintrag' : '2-Takt-Öl',
+    right: 'Sichern',
+    body,
+    onRight: () => {
+      if (!evaluate()) return;
+      const v = read();
+      const entry = cleanOil({ id: existing ? existing.id : uid(), ...v });
+      const before = knownOdometer();
+      data.oil = [...others, entry];
+      // Der km-Stand beim Ölnachfüllen ist gleichzeitig eine Tacho-Ablesung.
+      if (before == null || entry.odometer > before) data.reading = { odometer: entry.odometer, date: entry.date };
+      commit();
+      closeSheet();
+      renderView();
+      toast(entry.liters === 0 && !entry.full ? 'Kontrolle eingetragen' : 'Öl eingetragen');
+    },
+    onAction: async (a) => {
+      if (a !== 'delete') return;
+      const yes = await confirmAction({ message: 'Dieser Öl-Eintrag wird gelöscht.', confirmLabel: 'Eintrag löschen' });
+      if (!yes) return;
+      data.oil = others;
+      commit();
+      closeSheet();
+      renderView();
+      toast('Eintrag gelöscht');
+    },
+    onOpen: (root) => {
+      root.querySelectorAll('input').forEach((i) => i.addEventListener('input', evaluate));
+      root.querySelector('#o-full').addEventListener('change', evaluate);
+      evaluate();
+      if (!isEdit) root.querySelector('#o-odo').focus({ preventScroll: true });
     },
   });
 }
@@ -1107,9 +1347,22 @@ function demoData() {
     liters = Math.round(liters * 100) / 100;
     fills.push({ id: uid(), date: day(Math.min(offset, -3)), odometer: odo, liters, full: true, price: Math.round(liters * price() * 100) / 100 });
   }
+  // 2-Takt-Öl: ca. 60 ml/100 km (Pumpe ≈ 1:45), dazwischen eine Kontrolle
+  const dateAt = (o) => {
+    const near = fills.reduce((a, f) => (Math.abs(f.odometer - o) < Math.abs(a.odometer - o) ? f : a));
+    return near.date;
+  };
+  const o0 = fills[0].odometer;
+  const oil = [
+    { id: uid(), date: dateAt(o0), odometer: o0, liters: 0.3, full: true },
+    { id: uid(), date: dateAt(o0 + 548), odometer: o0 + 548, liters: 0.34, full: true },
+    { id: uid(), date: dateAt(o0 + 1121), odometer: o0 + 1121, liters: 0.36, full: true },
+    { id: uid(), date: dateAt(o0 + 1451), odometer: o0 + 1451, liters: 0, full: false },
+  ];
   return normalize({
     settings: data.settings,
     fillUps: fills,
+    oil,
     reading: { odometer: odo + 46, date: todayISO() },
     demo: true,
     ui: data.ui,
@@ -1133,6 +1386,19 @@ async function handleAction(el) {
     }
     case 'reading':
       openReadingSheet();
+      break;
+    case 'add-oil':
+      openOilSheet();
+      break;
+    case 'edit-oil': {
+      const e = data.oil.find((x) => x.id === el.dataset.id);
+      if (e) openOilSheet(e);
+      break;
+    }
+    case 'history-mode':
+      historyMode = el.dataset.mode === 'oil' ? 'oil' : 'fuel';
+      renderNavbar();
+      renderView();
       break;
     case 'goto':
       switchTab(el.dataset.tab);

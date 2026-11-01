@@ -38,6 +38,18 @@ deinen echten Verbrauch.
   und vergleicht hinterher mit der echten Menge. Die Analyse zeigt, wie dieser Fehler
   über die Zeit kleiner wird.
 
+## 2-Takt-Öl
+
+Der Bali hat Getrenntschmierung: Eine Ölpumpe mischt das 2-Takt-Öl aus dem separaten
+Öltank (ca. 1,2 L) automatisch bei, etwa im Verhältnis 1:40 bis 1:50.
+
+- **Eintragen:** km-Stand + nachgefüllte Menge, Schalter „Bis zur Markierung“.
+  Nur kontrolliert? `0` eintragen und den Schalter ausschalten.
+- **Ölstand:** wird aus den gefahrenen km geschätzt, mit Warnung ab 0,3 L Rest.
+- **Erinnerung:** alle 500 km „Öl kontrollieren“ (einstellbar).
+- **Lernen:** Startwert = Benzinverbrauch ÷ 50. Ab dem zweiten Auffüllen bis zur Markierung
+  lernt die App den echten Ölverbrauch (ml/100 km) und das tatsächliche Mischverhältnis.
+
 ## Daten
 
 Alles bleibt lokal auf dem Gerät (`localStorage`). In den Einstellungen gibt es
