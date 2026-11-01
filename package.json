@@ -1,0 +1,10 @@
+{
+  "name": "rollertanktracken",
+  "private": true,
+  "type": "module",
+  "description": "Tankstand- und Reichweiten-Tracker für den Roller (iOS-Web-App)",
+  "scripts": {
+    "test": "node --test tests/*.test.js",
+    "start": "python3 -m http.server 8080 --directory site"
+  }
+}

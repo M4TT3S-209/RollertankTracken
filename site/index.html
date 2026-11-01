@@ -1,0 +1,48 @@
+<!doctype html>
+<html lang="de">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+  <meta name="color-scheme" content="light dark">
+  <meta name="description" content="Tankstand, Verbrauch und Reichweite deines Rollers – mit lernender Prognose.">
+  <meta name="apple-mobile-web-app-capable" content="yes">
+  <meta name="mobile-web-app-capable" content="yes">
+  <meta name="apple-mobile-web-app-status-bar-style" content="default">
+  <meta name="apple-mobile-web-app-title" content="Roller Tank">
+  <meta name="format-detection" content="telephone=no">
+  <meta name="theme-color" content="#f2f2f7" media="(prefers-color-scheme: light)">
+  <meta name="theme-color" content="#000000" media="(prefers-color-scheme: dark)">
+  <title>Roller Tank</title>
+  <link rel="manifest" href="manifest.webmanifest">
+  <link rel="icon" href="icons/icon.svg" type="image/svg+xml">
+  <link rel="apple-touch-icon" href="icons/apple-touch-icon.png">
+  <link rel="stylesheet" href="css/app.css">
+  <script type="module" src="js/app.js"></script>
+</head>
+<body>
+  <header class="navbar" id="navbar">
+    <div class="navbar-title" id="navbar-title">Tank</div>
+    <div class="navbar-actions" id="navbar-actions"></div>
+  </header>
+
+  <main id="main">
+    <section class="view active" id="view-tank" aria-label="Tank"></section>
+    <section class="view" id="view-history" aria-label="Verlauf"></section>
+    <section class="view" id="view-analysis" aria-label="Analyse"></section>
+    <section class="view" id="view-settings" aria-label="Einstellungen"></section>
+  </main>
+
+  <nav class="tabbar" aria-label="Hauptnavigation">
+    <div class="tabbar-inner" role="tablist" id="tabbar"></div>
+  </nav>
+
+  <div class="backdrop" id="backdrop"></div>
+  <div class="sheet" id="sheet" role="dialog" aria-modal="true"></div>
+  <div class="toast" id="toast" role="status" aria-live="polite"></div>
+  <input type="file" id="import-file" accept=".json,application/json" hidden>
+
+  <noscript>
+    <p style="padding:24px">Bitte JavaScript aktivieren, um Roller Tank zu nutzen.</p>
+  </noscript>
+</body>
+</html>
