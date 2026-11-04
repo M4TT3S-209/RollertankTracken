@@ -2369,32 +2369,33 @@ table.data td:first-child {
   height: calc(34px * 7);
 }
 
-.wheel-scroll {
+.wheel-view {
+  position: relative;
   height: 100%;
-  overflow-y: scroll;
-  overscroll-behavior: contain;
-  scroll-snap-type: y mandatory;
-  scrollbar-width: none;
-  touch-action: pan-y;
+  overflow: hidden;
+  touch-action: none;
   outline: none;
-  -webkit-mask-image: linear-gradient(to bottom, transparent, #000 32%, #000 68%, transparent);
-  mask-image: linear-gradient(to bottom, transparent, #000 32%, #000 68%, transparent);
+  cursor: grab;
+  -webkit-user-select: none;
+  user-select: none;
+  -webkit-mask-image: linear-gradient(to bottom, transparent, #000 30%, #000 70%, transparent);
+  mask-image: linear-gradient(to bottom, transparent, #000 30%, #000 70%, transparent);
 }
 
-.wheel-scroll::-webkit-scrollbar {
-  display: none;
-}
-
-.wheel-items {
-  padding: calc(34px * 3) 0;
+.wheel-view:active {
+  cursor: grabbing;
 }
 
 .wheel-item {
+  position: absolute;
+  left: 0;
+  right: 0;
+  top: 50%;
   height: 34px;
+  margin-top: -17px;
   line-height: 34px;
   padding-right: var(--unit-space, 40px);
   text-align: right;
-  scroll-snap-align: center;
   font-size: 21px;
   font-weight: 500;
   font-variant-numeric: tabular-nums;
@@ -2402,18 +2403,13 @@ table.data td:first-child {
   white-space: nowrap;
   transform-origin: 50% 50%;
   backface-visibility: hidden;
-  cursor: pointer;
-  -webkit-user-select: none;
-  user-select: none;
+  will-change: transform, opacity;
+  pointer-events: none;
 }
 
-.wheel-scroll:focus-visible ~ .wheel-input,
-.wheel-scroll:focus-visible {
-  outline: none;
-}
-
-.wheel-scroll:focus-visible .wheel-items {
-  filter: drop-shadow(0 0 0.5px var(--blue));
+.wheel-view:focus-visible {
+  box-shadow: inset 0 0 0 2px color-mix(in srgb, var(--blue) 45%, transparent);
+  border-radius: 12px;
 }
 
 /* Eintippen: Feld liegt genau auf dem Band */
@@ -2448,7 +2444,7 @@ table.data td:first-child {
   display: block;
 }
 
-.wheel.empty .wheel-scroll {
+.wheel.empty .wheel-view {
   visibility: hidden;
 }
 

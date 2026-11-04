@@ -1,26 +1,56 @@
-// Scroll-Rad (Picker) im iOS-Stil.
+// Scroll-Rad (Picker) im iOS-Stil – mit eigener Wisch-Physik.
 //
-// Nutzt das native Schwung-Scrollen des Systems (schnelles Wischen läuft weit,
-// am Ende rastet es per CSS-Scroll-Snap genau auf einem Wert ein). Die Walzen-
-// Optik entsteht per 3D-Transform der sichtbaren Zeilen. Ein Tipp auf den Wert
-// in der Mitte öffnet die Tastatur, ein Tipp auf einen anderen Wert springt hin.
+// Warum eigene Physik? Natives Scrollen mit Einrasten (CSS-Scroll-Snap) bremst
+// auf iOS nach jedem Wischer fast sofort ab – für 200 km müsste man ewig wischen.
+// Hier gilt:
+//   • langsames Ziehen bewegt das Rad 1:1 (präzise),
+//   • schnelle Wischer werden verstärkt (bis zu 4,5×),
+//   • mehrere Wischer hintereinander addieren ihren Schwung (wie bei iOS-Listen),
+//   • am Ende läuft das Rad weich aus und landet exakt auf einem Wert.
+// Gerendert werden nur die sichtbaren Zeilen – der Wertebereich kann beliebig groß sein.
 
 export const ROW = 34; // Zeilenhöhe in px
-const SIDE = 3; // Zeilen ober- und unterhalb der Mitte
+const SIDE = 3; // sichtbare Zeilen ober- und unterhalb der Mitte
 const STEP_DEG = 19; // Winkel pro Zeile auf der Walze
 const RADIUS = ROW / ((STEP_DEG * Math.PI) / 180);
 
+// Physik (Einheit: Zeilen bzw. Zeilen pro Sekunde)
+export const PHYSICS = Object.freeze({
+  LAMBDA: 2.4, // Abbremsrate – Wurfweite ohne Verstärkung = v / LAMBDA
+  BOOST_REF: 18, // ab dieser Geschwindigkeit greift die Verstärkung spürbar
+  BOOST_EXP: 1.3,
+  BOOST_MAX: 4.5,
+  CHAIN: 0.9, // so viel Restschwung wird beim nächsten Wischer übernommen
+  MIN_FLICK: 1.5, // darunter: nur einrasten
+});
+
 const clamp = (v, lo, hi) => Math.min(hi, Math.max(lo, v));
+
+/** Verstärkung abhängig von der Wischgeschwindigkeit (Zeilen/s). */
+export function boost(speed) {
+  return Math.min(PHYSICS.BOOST_MAX, 1 + (Math.abs(speed) / PHYSICS.BOOST_REF) ** PHYSICS.BOOST_EXP);
+}
+
+/** Wohin läuft ein Wischer aus? Gibt Zielzeile (ganzzahlig, im Bereich) und Dauer zurück. */
+export function projectFlick(pos, velocity, count, carried = 0) {
+  let v = velocity * boost(velocity);
+  if (carried && Math.sign(carried) === Math.sign(v)) v += carried * PHYSICS.CHAIN;
+  const target = clamp(Math.round(pos + v / PHYSICS.LAMBDA), 0, count - 1);
+  const dist = target - pos;
+  const duration = Math.abs(v) > 0.01 ? clamp(Math.abs((3 * dist) / v), 0.28, 2.4) : 0.3;
+  return { target, duration, velocity: v };
+}
 
 /* ---------- Haptik: kurzes Ticken pro Raste ---------- */
 
 let hapticLabel = null;
 let lastHaptic = 0;
-const isIOS = /iPhone|iPad|iPod/.test(navigator.userAgent) || (navigator.platform === 'MacIntel' && navigator.maxTouchPoints > 1);
+const isIOS = typeof navigator !== 'undefined'
+  && (/iPhone|iPad|iPod/.test(navigator.userAgent || '') || (navigator.platform === 'MacIntel' && navigator.maxTouchPoints > 1));
 
 function tick() {
   const now = performance.now();
-  if (now - lastHaptic < 32) return;
+  if (now - lastHaptic < 35) return;
   lastHaptic = now;
   try {
     if (navigator.vibrate) {
@@ -49,107 +79,219 @@ function tick() {
 /**
  * @param {HTMLElement} host
  * @param {object} o
- *   value      Startwert (null → Eingabefeld statt Rad, z. B. allererster km-Stand)
- *   min, max   Grenzen (Werte, nicht Zeilen)
- *   step       Schrittweite (1 km, 0.01 L …)
- *   span       {below, above}: Rad wird um den Wert herum aufgebaut (statt min/max fix)
- *   format     v → Anzeige-Text
- *   parse      Text → Zahl
- *   label      Bezeichnung für Screenreader
+ *   value       Startwert (null → Eingabefeld statt Rad, z. B. allererster km-Stand)
+ *   min, max    Grenzen (Werte)
+ *   step        Schrittweite (1 km, 0.01 L …)
+ *   format      v → Anzeige-Text
+ *   parse       Text → Zahl
+ *   label       Bezeichnung für Screenreader
  *   placeholder Text im Eingabefeld
- *   onChange   (value, {user}) → void
+ *   onChange    (value, {user}) → void
  */
 export function mountWheel(host, o) {
   const step = o.step || 1;
   const toTick = (v) => Math.round(v / step);
   const fromTick = (t) => Number((t * step).toFixed(6));
-  const absMin = o.min != null ? toTick(o.min) : 0;
-  const absMax = o.max != null ? toTick(o.max) : Infinity;
+  const tMin = toTick(o.min ?? 0);
+  const tMax = toTick(o.max ?? 999999);
+  const count = tMax - tMin + 1;
 
-  let tMin = 0;
-  let tMax = 0;
-  let curIdx = -1;
-  let items = [];
-  let styled = [];
-  let raf = 0;
-  let current = o.value == null ? null : clamp(toTick(o.value), absMin, absMax);
+  let pos = 0; // aktuelle Position in Zeilen (Kommazahl während der Bewegung)
+  let idx = -1; // eingerastete Zeile
+  let hasValue = o.value != null;
+  let anim = null; // laufende Animation
+  let carried = 0; // Restschwung für verkettete Wischer
+  let carriedAt = 0;
 
   host.classList.add('wheel');
   host.innerHTML = `
-    <div class="wheel-scroll" tabindex="0" role="spinbutton" aria-label="${o.label || ''}"><div class="wheel-items"></div></div>
+    <div class="wheel-view" tabindex="0" role="spinbutton" aria-label="${o.label || ''}"
+      aria-valuemin="${fromTick(tMin)}" aria-valuemax="${fromTick(tMax)}">
+      ${'<div class="wheel-item"></div>'.repeat(SIDE * 2 + 3)}
+    </div>
     <input class="wheel-input" type="text" inputmode="decimal" autocomplete="off" enterkeyhint="done" aria-label="${o.label || ''} eintippen" placeholder="${o.placeholder || ''}">`;
-  const scroller = host.querySelector('.wheel-scroll');
-  const list = host.querySelector('.wheel-items');
+  const view = host.querySelector('.wheel-view');
   const input = host.querySelector('.wheel-input');
+  const pool = [...view.querySelectorAll('.wheel-item')];
+  const shownText = new Array(pool.length).fill(null);
 
-  function range(center) {
-    if (o.span) {
-      tMin = Math.max(absMin, center - toTick(o.span.below));
-      tMax = Math.min(absMax, center + toTick(o.span.above));
-    } else {
-      tMin = absMin;
-      tMax = absMax;
-    }
-  }
+  /* ---------- Zeichnen ---------- */
 
-  function build() {
-    range(current);
-    const n = tMax - tMin + 1;
-    const parts = new Array(n);
-    for (let i = 0; i < n; i += 1) parts[i] = `<div class="wheel-item" data-i="${i}">${o.format(fromTick(tMin + i))}</div>`;
-    list.innerHTML = parts.join('');
-    items = list.children;
-    styled = [];
-    scroller.setAttribute('aria-valuemin', String(fromTick(tMin)));
-    scroller.setAttribute('aria-valuemax', String(fromTick(tMax)));
-  }
-
-  function jumpTo(t, smooth = false) {
-    const idx = clamp(t - tMin, 0, tMax - tMin);
-    if (smooth) {
-      scroller.scrollTo({ top: idx * ROW, behavior: 'smooth' });
-      return;
-    }
-    curIdx = idx; // programmatisch: kein onChange auslösen
-    scroller.scrollTop = idx * ROW;
-    paint();
-  }
-
-  function paint() {
-    raf = 0;
-    if (!items.length) return;
-    const c = scroller.scrollTop / ROW;
-    const from = Math.max(0, Math.floor(c) - SIDE - 1);
-    const to = Math.min(items.length - 1, Math.ceil(c) + SIDE + 1);
-    for (const i of styled) {
-      if (i < from || i > to) {
-        items[i].style.transform = '';
-        items[i].style.opacity = '';
+  function render() {
+    const base = Math.floor(pos) - SIDE - 1;
+    for (let k = 0; k < pool.length; k += 1) {
+      const i = base + k;
+      const el = pool[k];
+      const d = i - pos;
+      if (i < 0 || i >= count || Math.abs(d) > SIDE + 0.9) {
+        el.style.visibility = 'hidden';
+        continue;
       }
-    }
-    styled = [];
-    for (let i = from; i <= to; i += 1) {
-      const d = i - c;
+      const text = o.format(fromTick(tMin + i));
+      if (shownText[k] !== text) {
+        el.textContent = text;
+        shownText[k] = text;
+      }
       const deg = clamp(d * STEP_DEG, -88, 88);
       const rad = (deg * Math.PI) / 180;
-      const shift = RADIUS * Math.sin(rad) - d * ROW; // auf die Walze „biegen“
-      items[i].style.transform = `translateY(${shift.toFixed(2)}px) perspective(380px) rotateX(${(-deg).toFixed(2)}deg)`;
-      items[i].style.opacity = String(Math.max(0.1, Math.cos(rad) ** 1.4).toFixed(3));
-      styled.push(i);
+      el.style.visibility = 'visible';
+      el.style.transform = `translateY(${(RADIUS * Math.sin(rad)).toFixed(2)}px) perspective(380px) rotateX(${(-deg).toFixed(2)}deg)`;
+      el.style.opacity = Math.max(0.08, Math.cos(rad) ** 1.4).toFixed(3);
     }
-    const idx = clamp(Math.round(c), 0, items.length - 1);
-    if (idx !== curIdx) {
-      curIdx = idx;
-      current = tMin + idx;
-      scroller.setAttribute('aria-valuenow', String(fromTick(current)));
-      scroller.setAttribute('aria-valuetext', o.format(fromTick(current)));
-      tick();
-      if (o.onChange) o.onChange(fromTick(current), { user: true });
+    const now = clamp(Math.round(pos), 0, count - 1);
+    if (now !== idx) {
+      const first = idx === -1;
+      idx = now;
+      view.setAttribute('aria-valuenow', String(fromTick(tMin + idx)));
+      view.setAttribute('aria-valuetext', o.format(fromTick(tMin + idx)));
+      if (!first && !silent) {
+        tick();
+        if (o.onChange) o.onChange(fromTick(tMin + idx), { user: true });
+      }
     }
   }
 
+  let silent = false;
+  function place(p, quiet = false) {
+    pos = p;
+    silent = quiet;
+    render();
+    silent = false;
+  }
+
+  /* ---------- Animation ---------- */
+
+  function stopAnim() {
+    if (!anim) return;
+    cancelAnimationFrame(anim.raf);
+    // Restschwung merken (für den nächsten Wischer)
+    const t = Math.min(1, (performance.now() - anim.t0) / anim.dur);
+    carried = anim.v0 * (1 - t) ** 2;
+    carriedAt = performance.now();
+    anim = null;
+  }
+
+  function animateTo(target, dur, v0 = 0) {
+    stopAnim();
+    const from = pos;
+    const dist = target - from;
+    if (Math.abs(dist) < 1e-3) {
+      place(target);
+      return;
+    }
+    const a = { t0: performance.now(), dur: dur * 1000, v0, raf: 0 };
+    const stepFn = (now) => {
+      const t = Math.min(1, (now - a.t0) / a.dur);
+      const e = 1 - (1 - t) ** 3; // ease-out: schnell los, weich auslaufen
+      place(from + dist * e);
+      if (t < 1) a.raf = requestAnimationFrame(stepFn);
+      else {
+        anim = null;
+        carried = 0;
+      }
+    };
+    anim = a;
+    a.raf = requestAnimationFrame(stepFn);
+  }
+
+  const snap = () => animateTo(clamp(Math.round(pos), 0, count - 1), 0.28);
+
+  /* ---------- Ziehen & Wischen ---------- */
+
+  let drag = null;
+
+  view.addEventListener('pointerdown', (e) => {
+    if (!hasValue) return;
+    if (e.pointerType === 'mouse' && e.button !== 0) return;
+    const wasMoving = !!anim;
+    stopAnim();
+    drag = { id: e.pointerId, y0: e.clientY, p0: pos, t0: performance.now(), moved: false, wasMoving, samples: [{ t: performance.now(), p: pos }] };
+    view.setPointerCapture(e.pointerId);
+  });
+
+  view.addEventListener('pointermove', (e) => {
+    if (!drag || e.pointerId !== drag.id) return;
+    const dy = e.clientY - drag.y0;
+    if (Math.abs(dy) > 4) drag.moved = true;
+    let p = drag.p0 - dy / ROW;
+    // Gummiband an den Enden
+    if (p < 0) p = -((-p) ** 0.7) * 0.6;
+    else if (p > count - 1) p = count - 1 + ((p - (count - 1)) ** 0.7) * 0.6;
+    place(p);
+    const now = performance.now();
+    drag.samples.push({ t: now, p });
+    while (drag.samples.length > 2 && now - drag.samples[0].t > 100) drag.samples.shift();
+  });
+
+  const endDrag = (e) => {
+    if (!drag || e.pointerId !== drag.id) return;
+    const d = drag;
+    drag = null;
+    const now = performance.now();
+
+    if (!d.moved && now - d.t0 < 350) {
+      if (d.wasMoving) {
+        snap(); // Tippen stoppt das laufende Rad
+        return;
+      }
+      // Tippen: auf die Mitte → Tastatur, sonst zu der angetippten Zeile springen
+      const rect = view.getBoundingClientRect();
+      const off = clamp((e.clientY - (rect.top + rect.height / 2)) / RADIUS, -0.99, 0.99);
+      const rows = Math.round(((Math.asin(off) * 180) / Math.PI) / STEP_DEG);
+      if (rows === 0) showInput();
+      else animateTo(clamp(idx + rows, 0, count - 1), 0.32);
+      return;
+    }
+
+    // Geschwindigkeit kurz vor dem Loslassen (letzte ~50 ms, wie iOS)
+    const s = d.samples;
+    let v = 0;
+    const last = s[s.length - 1];
+    if (s.length >= 2 && now - last.t < 80) {
+      let first = s[s.length - 2];
+      for (let i = s.length - 2; i >= 0 && last.t - s[i].t <= 50; i -= 1) first = s[i];
+      if (last.t - first.t > 4) v = ((last.p - first.p) / (last.t - first.t)) * 1000;
+    }
+    host.dataset.flickV = v.toFixed(1); // hilft beim Testen
+    if (pos < 0 || pos > count - 1 || Math.abs(v) < PHYSICS.MIN_FLICK) {
+      snap();
+      return;
+    }
+    const keep = now - carriedAt < 600 ? carried : 0;
+    const f = projectFlick(pos, v, count, keep);
+    animateTo(f.target, f.duration, f.velocity);
+  };
+  view.addEventListener('pointerup', endDrag);
+  view.addEventListener('pointercancel', endDrag);
+
+  // Mausrad / Trackpad (Desktop)
+  let wheelTimer = 0;
+  view.addEventListener('wheel', (e) => {
+    if (!hasValue) return;
+    e.preventDefault();
+    stopAnim();
+    const unit = e.deltaMode === 1 ? ROW : e.deltaMode === 2 ? ROW * 7 : 1;
+    place(clamp(pos + (e.deltaY * unit) / ROW / 1.4, 0, count - 1));
+    clearTimeout(wheelTimer);
+    wheelTimer = setTimeout(snap, 120);
+  }, { passive: false });
+
+  view.addEventListener('keydown', (e) => {
+    const delta = { ArrowUp: -1, ArrowDown: 1, PageUp: -10, PageDown: 10 }[e.key];
+    if (delta) {
+      e.preventDefault();
+      animateTo(clamp(idx + delta, 0, count - 1), 0.2);
+    } else if (e.key === 'Enter') {
+      e.preventDefault();
+      showInput();
+    }
+  });
+
+  /* ---------- Eintippen ---------- */
+
   function showInput() {
-    input.value = current == null ? '' : o.format(fromTick(current)).replace(/\./g, '').replace(/^–$/, '');
+    stopAnim();
+    input.value = hasValue ? o.format(fromTick(tMin + idx)).replace(/\./g, '').replace(/^–$/, '') : '';
     host.classList.add('editing');
     input.focus({ preventScroll: true });
     input.select();
@@ -159,77 +301,50 @@ export function mountWheel(host, o) {
     if (!host.classList.contains('editing')) return;
     const v = o.parse(input.value);
     if (Number.isFinite(v)) {
-      const t = clamp(toTick(v), absMin, absMax);
-      const rebuild = current == null || t < tMin || t > tMax;
-      current = t;
-      if (rebuild) build();
+      const i = clamp(toTick(v), tMin, tMax) - tMin;
+      hasValue = true;
       host.classList.remove('editing', 'empty');
-      jumpTo(t);
-      if (o.onChange) o.onChange(fromTick(t), { user: true });
-    } else if (current != null) {
+      place(i, true);
+      idx = i;
+      if (o.onChange) o.onChange(fromTick(tMin + i), { user: true });
+    } else if (hasValue) {
       host.classList.remove('editing');
     }
   }
-
-  scroller.addEventListener('scroll', () => {
-    if (!raf) raf = requestAnimationFrame(paint);
-  }, { passive: true });
-
-  list.addEventListener('click', (e) => {
-    const item = e.target.closest('.wheel-item');
-    if (!item) return;
-    const i = Number(item.dataset.i);
-    if (i === curIdx) showInput();
-    else jumpTo(tMin + i, true);
-  });
-
-  scroller.addEventListener('keydown', (e) => {
-    const delta = { ArrowUp: -1, ArrowDown: 1, PageUp: -10, PageDown: 10 }[e.key];
-    if (delta) {
-      e.preventDefault();
-      jumpTo(tMin + clamp(curIdx + delta, 0, items.length - 1), true);
-    } else if (e.key === 'Enter') {
-      e.preventDefault();
-      showInput();
-    }
-  });
 
   input.addEventListener('keydown', (e) => {
     if (e.key === 'Enter') {
       e.preventDefault();
       input.blur();
-    } else if (e.key === 'Escape' && current != null) {
+    } else if (e.key === 'Escape' && hasValue) {
       host.classList.remove('editing');
     }
   });
   input.addEventListener('blur', commitInput);
   input.addEventListener('change', commitInput);
 
-  if (current == null) {
-    host.classList.add('empty', 'editing');
+  /* ---------- Start ---------- */
+
+  if (hasValue) {
+    place(clamp(toTick(o.value), tMin, tMax) - tMin, true);
   } else {
-    build();
-    // erst nach dem Einfügen ins Layout positionieren
-    requestAnimationFrame(() => jumpTo(current));
-    jumpTo(current);
+    host.classList.add('empty', 'editing');
   }
 
   return {
     get value() {
-      return current == null ? null : fromTick(current);
+      return hasValue ? fromTick(tMin + idx) : null;
     },
     /** programmatisch setzen (z. B. Liter folgen der Prognose) – löst kein onChange aus */
     set(v) {
-      if (!Number.isFinite(v)) return;
-      const t = clamp(toTick(v), absMin, absMax);
-      if (t === current && current != null) return;
-      const rebuild = current == null || t < tMin || t > tMax;
-      current = t;
-      if (rebuild) {
-        build();
-        host.classList.remove('editing', 'empty');
-      }
-      jumpTo(t);
+      if (!Number.isFinite(v) || drag) return;
+      const i = clamp(toTick(v), tMin, tMax) - tMin;
+      if (hasValue && i === idx && !anim) return;
+      stopAnim();
+      carried = 0;
+      hasValue = true;
+      host.classList.remove('editing', 'empty');
+      place(i, true);
     },
     focusInput: showInput,
     el: host,
