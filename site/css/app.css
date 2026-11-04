@@ -2302,3 +2302,223 @@ table.data td:first-child {
     grid-template-columns: repeat(4, 1fr);
   }
 }
+
+/* --------------------------------------------------------------------------
+   Scroll-Räder (Picker) – Werte per Wischen einstellen
+   -------------------------------------------------------------------------- */
+
+.picker {
+  margin-top: 14px;
+  padding: 12px 6px 8px;
+  border-radius: 28px;
+  background: var(--glass-solid);
+}
+
+.picker-head,
+.picker-body {
+  display: grid;
+  grid-template-columns: var(--cols, 1fr);
+  gap: 4px;
+}
+
+.picker-label {
+  text-align: center;
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--label-2);
+  padding-bottom: 2px;
+}
+
+.picker-body {
+  position: relative;
+}
+
+/* Glas-Band in der Mitte, auf dem der gewählte Wert steht */
+.picker-band {
+  position: absolute;
+  z-index: 0;
+  left: 4px;
+  right: 4px;
+  top: calc(34px * 3);
+  height: 34px;
+  border-radius: 12px;
+  background: var(--fill-3);
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.35), inset 0 0 0 0.5px var(--sep);
+  pointer-events: none;
+}
+
+.picker-col {
+  position: relative;
+  z-index: 1;
+  min-width: 0;
+}
+
+.picker-unit {
+  position: absolute;
+  right: 12px;
+  top: calc(34px * 3);
+  line-height: 34px;
+  font-size: 15px;
+  font-weight: 600;
+  color: var(--label-2);
+  pointer-events: none;
+}
+
+.wheel {
+  position: relative;
+  height: calc(34px * 7);
+}
+
+.wheel-scroll {
+  height: 100%;
+  overflow-y: scroll;
+  overscroll-behavior: contain;
+  scroll-snap-type: y mandatory;
+  scrollbar-width: none;
+  touch-action: pan-y;
+  outline: none;
+  -webkit-mask-image: linear-gradient(to bottom, transparent, #000 32%, #000 68%, transparent);
+  mask-image: linear-gradient(to bottom, transparent, #000 32%, #000 68%, transparent);
+}
+
+.wheel-scroll::-webkit-scrollbar {
+  display: none;
+}
+
+.wheel-items {
+  padding: calc(34px * 3) 0;
+}
+
+.wheel-item {
+  height: 34px;
+  line-height: 34px;
+  padding-right: var(--unit-space, 40px);
+  text-align: right;
+  scroll-snap-align: center;
+  font-size: 21px;
+  font-weight: 500;
+  font-variant-numeric: tabular-nums;
+  letter-spacing: -0.2px;
+  white-space: nowrap;
+  transform-origin: 50% 50%;
+  backface-visibility: hidden;
+  cursor: pointer;
+  -webkit-user-select: none;
+  user-select: none;
+}
+
+.wheel-scroll:focus-visible ~ .wheel-input,
+.wheel-scroll:focus-visible {
+  outline: none;
+}
+
+.wheel-scroll:focus-visible .wheel-items {
+  filter: drop-shadow(0 0 0.5px var(--blue));
+}
+
+/* Eintippen: Feld liegt genau auf dem Band */
+.wheel-input {
+  position: absolute;
+  z-index: 2;
+  left: 4px;
+  right: 4px;
+  top: calc(34px * 3);
+  height: 34px;
+  padding: 0 var(--unit-space, 40px) 0 8px;
+  border: 0;
+  border-radius: 12px;
+  outline: none;
+  text-align: right;
+  font-size: 21px;
+  font-weight: 600;
+  font-variant-numeric: tabular-nums;
+  color: var(--label);
+  background: var(--glass-solid);
+  box-shadow: inset 0 0 0 2px var(--blue);
+  display: none;
+}
+
+.wheel-input::placeholder {
+  font-size: 14px;
+  font-weight: 500;
+  color: var(--label-3);
+}
+
+.wheel.editing .wheel-input {
+  display: block;
+}
+
+.wheel.empty .wheel-scroll {
+  visibility: hidden;
+}
+
+.picker-hint {
+  margin: 6px 12px 2px;
+  text-align: center;
+  font-size: 11px;
+  color: var(--label-3);
+}
+
+/* Datum + Uhrzeit als Kapseln */
+.dt-pills {
+  margin-left: auto;
+  display: flex;
+  gap: 6px;
+}
+
+.field .dt-pills input[type="date"],
+.field .dt-pills input[type="time"] {
+  -webkit-appearance: none;
+  appearance: none;
+  flex: none;
+  min-height: 0;
+  height: 34px;
+  padding: 0 12px;
+  border: 0;
+  border-radius: 10px;
+  font-size: 16px;
+  font-weight: 500;
+  color: var(--label);
+  background: var(--fill-3);
+  font-variant-numeric: tabular-nums;
+  text-align: center;
+}
+
+.field .dt-pills input[type="date"],
+.field .dt-pills input[type="time"] {
+  width: auto;
+  min-width: 84px;
+  max-width: 100%;
+}
+
+.field .dt-pills {
+  flex: 1;
+  justify-content: flex-end;
+  min-width: 0;
+}
+
+.field .dt-pills input::-webkit-date-and-time-value {
+  text-align: center;
+}
+
+@media (max-width: 350px) {
+  .wheel-item,
+  .wheel-input {
+    font-size: 18px;
+  }
+
+  .picker-unit {
+    right: 8px;
+    font-size: 13px;
+  }
+}
+
+/* Einzelnes Rad (km-Stand ablesen): Wert mittig */
+.picker.single .wheel {
+  --unit-space: calc(50% - 46px);
+}
+
+.picker.single .picker-unit {
+  right: auto;
+  left: calc(50% + 54px);
+}

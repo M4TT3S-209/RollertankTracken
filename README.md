@@ -21,6 +21,12 @@ Danach startet Roller Tank wie eine normale App im Vollbild und funktioniert auc
 | Beim Tanken | km-Stand + getankte Liter (Schalter „Vollgetankt“ an, wenn bis zum Rand) |
 | Zwischendurch (optional) | aktueller km-Stand → Restreichweite und Tankinhalt werden aktualisiert |
 
+Zahlen werden nicht eingetippt, sondern mit **Scroll-Rädern** eingestellt (km in 1er-Schritten,
+Liter und Euro in Cent-Schritten, mit Schwung und Einrasten). Der km-Stand steht immer auf dem
+letzten eingetragenen Wert, die Liter folgen der Prognose und der Betrag dem Literpreis – bis du
+selbst drehst. Ein Tipp auf die Zahl in der Mitte öffnet die Tastatur (z. B. für den allerersten
+km-Stand). Datum und **Uhrzeit** werden automatisch mit der aktuellen Zeit vorbelegt.
+
 Die erste Volltankung ist der Startpunkt. Ab der zweiten Volltankung kennt die App
 deinen echten Verbrauch.
 

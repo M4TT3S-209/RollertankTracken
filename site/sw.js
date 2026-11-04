@@ -10,6 +10,7 @@ const ASSETS = [
   './js/model.js',
   './js/charts.js',
   './js/icons.js',
+  './js/wheel.js',
   './manifest.webmanifest',
   './icons/icon.svg',
   './icons/apple-touch-icon.png',

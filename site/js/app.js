@@ -3,6 +3,7 @@ import {
 } from './model.js';
 import { renderLearningChart, renderErrorChart } from './charts.js';
 import { icon } from './icons.js';
+import { mountWheel } from './wheel.js';
 
 const STORAGE_KEY = 'rollertank.v1';
 const BUILD = '__BUILD__';
@@ -28,6 +29,11 @@ function localISO(d = new Date()) {
   return z.toISOString().slice(0, 10);
 }
 const todayISO = () => localISO();
+const nowTime = () => {
+  const d = new Date();
+  return `${String(d.getHours()).padStart(2, '0')}:${String(d.getMinutes()).padStart(2, '0')}`;
+};
+const isTime = (t) => typeof t === 'string' && /^\d{2}:\d{2}$/.test(t);
 
 function toDate(iso) {
   return new Date(`${iso}T12:00:00`);
@@ -47,6 +53,10 @@ function relDate(iso) {
   return `am ${fDate(iso, { day: 'numeric', month: 'short' })}`;
 }
 
+function fWhen(date, time, opts = { weekday: 'short', day: 'numeric', month: 'short' }) {
+  return `${fDate(date, opts)}${isTime(time) ? `, ${time}` : ''}`;
+}
+
 const uid = () => (crypto.randomUUID ? crypto.randomUUID() : `${Date.now().toString(36)}${Math.random().toString(36).slice(2)}`);
 
 /* ========================================================================== */
@@ -61,18 +71,21 @@ function cleanFill(f) {
     liters: Number(f.liters),
     full: f.full !== false,
   };
+  if (isTime(f.time)) out.time = f.time;
   if (Number.isFinite(Number(f.price)) && Number(f.price) > 0) out.price = Number(f.price);
   return out;
 }
 
 function cleanOil(e) {
-  return {
+  const out = {
     id: String(e.id || uid()),
     date: /^\d{4}-\d{2}-\d{2}$/.test(e.date) ? e.date : todayISO(),
     odometer: Number(e.odometer),
     liters: Number(e.liters),
     full: e.full !== false,
   };
+  if (isTime(e.time)) out.time = e.time;
+  return out;
 }
 
 function normalize(d = {}) {
@@ -84,7 +97,7 @@ function normalize(d = {}) {
     ? d.oil.map(cleanOil).filter((e) => Number.isFinite(e.odometer) && e.odometer >= 0 && Number.isFinite(e.liters) && e.liters >= 0)
     : [];
   const reading = d.reading && Number.isFinite(Number(d.reading.odometer))
-    ? { odometer: Number(d.reading.odometer), date: d.reading.date || todayISO() }
+    ? { odometer: Number(d.reading.odometer), date: d.reading.date || todayISO(), ...(isTime(d.reading.time) ? { time: d.reading.time } : {}) }
     : null;
   return {
     version: 1,
@@ -371,7 +384,7 @@ function viewTank() {
       <div><div class="hero-stat-value">${fKm(st.kmSinceFull)} km</div><div class="hero-stat-label">seit Volltanken</div></div>
     </div>
   </section>
-  <div class="stand">${icon('clock', 'mini')}<span>km-Stand ${fOdo(st.odometer)} · ${relDate(st.odometerDate)}</span>
+  <div class="stand">${icon('clock', 'mini')}<span>km-Stand ${fOdo(st.odometer)} · ${relDate(st.odometerDate)}${isTime(timeAtOdometer(st.odometer)) ? `, ${timeAtOdometer(st.odometer)}` : ''}</span>
     <button data-action="reading">Aktualisieren</button></div>
 
   <div class="actions">
@@ -520,7 +533,7 @@ function viewHistory() {
     <div class="list"><button class="row" data-action="reading" style="--inset:58px">
       <span class="row-icon round bg-indigo">${icon('gauge')}</span>
       <span class="row-main"><span class="row-title">km ${fOdo(data.reading.odometer)}</span>
-        <span class="row-sub">km-Stand abgelesen · ${relDate(data.reading.date)}</span></span>
+        <span class="row-sub">km-Stand abgelesen · ${relDate(data.reading.date)}${isTime(data.reading.time) ? `, ${data.reading.time}` : ''}</span></span>
       <span class="row-detail"><span>+${fKm(data.reading.odometer - lastOdo)} km</span></span>
       ${icon('chevron', 'chev')}
     </button></div>`;
@@ -552,7 +565,7 @@ function viewHistory() {
         <span class="row-icon round ${f.full ? 'bg-blue' : 'bg-gray'}">${icon(f.full ? 'drop' : 'dropHalf')}</span>
         <span class="row-main">
           <span class="row-title"><b>${fL(f.liters)} L</b>${badges.join('')}${f.price ? `<span class="row-price">· ${fEur(f.price)} €</span>` : ''}</span>
-          <span class="row-sub">${fDate(f.date, { weekday: 'short', day: 'numeric', month: 'short' })} · km ${fOdo(f.odometer)}${seg ? ` · ${fKm(seg.km)} km` : ''}</span>
+          <span class="row-sub">${fWhen(f.date, f.time)} · km ${fOdo(f.odometer)}${seg ? ` · ${fKm(seg.km)} km` : ''}</span>
         </span>
         <span class="row-detail">${detail}</span>
         ${icon('chevron', 'chev')}
@@ -594,7 +607,7 @@ function viewOilHistory() {
       <span class="row-icon round ${checkOnly ? 'bg-gray' : 'bg-brown'}">${icon(checkOnly ? 'check' : 'oil')}</span>
       <span class="row-main">
         <span class="row-title"><b>${checkOnly ? 'Kontrolliert' : `${nf(e.liters, 2, 2)} L`}</b>${badges.join('')}</span>
-        <span class="row-sub">${fDate(e.date, { weekday: 'short', day: 'numeric', month: 'short' })} · km ${fOdo(e.odometer)}${seg ? ` · ${fKm(seg.km)} km` : ''}</span>
+        <span class="row-sub">${fWhen(e.date, e.time)} · km ${fOdo(e.odometer)}${seg ? ` · ${fKm(seg.km)} km` : ''}</span>
       </span>
       <span class="row-detail">${detail}</span>
       ${icon('chevron', 'chev')}
@@ -901,40 +914,95 @@ backdrop.addEventListener('click', () => closeSheet());
   sheet.addEventListener('pointercancel', end);
 })();
 
+/* ---------- Gemeinsame Bausteine: Zeitpunkt + Scroll-Räder ---------- */
+
+const fmtKmWheel = (v) => nf(v, 0, 0);
+const fmtL2 = (v) => nf(v, 2, 2);
+const fmtEurWheel = (v) => (v === 0 ? '–' : nf(v, 2, 2));
+const round2 = (v) => Math.round(v * 100) / 100;
+
+function knownOdometer() {
+  const odos = [...data.fillUps.map((f) => f.odometer), ...data.oil.map((e) => e.odometer)];
+  if (data.reading) odos.push(data.reading.odometer);
+  return odos.length ? Math.max(...odos) : null;
+}
+
+function timeAtOdometer(odo) {
+  if (data.reading && data.reading.odometer === odo) return data.reading.time;
+  const hit = data.fillUps.find((f) => f.odometer === odo) || data.oil.find((e) => e.odometer === odo);
+  return hit ? hit.time : undefined;
+}
+
+function whenField(prefix, date, time) {
+  return `<div class="field"><label class="field-label" for="${prefix}-date">Datum</label>
+      <div class="dt-pills"><input id="${prefix}-date" type="date" value="${esc(date)}"></div></div>
+    <div class="field"><label class="field-label" for="${prefix}-time">Uhrzeit</label>
+      <div class="dt-pills"><input id="${prefix}-time" type="time" value="${esc(time || '')}"></div></div>`;
+}
+
+function pickerHtml(cols, single = false) {
+  return `<div class="card picker${single ? ' single' : ''}" style="--cols:${cols.map((c) => `${c.fr || 1}fr`).join(' ')}">
+    <div class="picker-head">${cols.map((c) => `<div class="picker-label">${c.label}</div>`).join('')}</div>
+    <div class="picker-body"><div class="picker-band" aria-hidden="true"></div>
+      ${cols.map((c) => `<div class="picker-col"><div data-wheel="${c.key}"></div><span class="picker-unit">${c.unit}</span></div>`).join('')}
+    </div>
+    <p class="picker-hint">Wischen zum Einstellen · Mitte antippen zum Eintippen</p>
+  </div>`;
+}
+
+/** Bündelt schnelle Änderungen beim Drehen, damit die Vorschau flüssig bleibt. */
+function debounced(fn, ms = 70) {
+  let t = null;
+  return () => {
+    clearTimeout(t);
+    t = setTimeout(fn, ms);
+  };
+}
+
 /* ---------- Tankung erfassen / bearbeiten ---------- */
 
 function openFillSheet(existing) {
   const isEdit = !!existing;
   const others = data.fillUps.filter((f) => !existing || f.id !== existing.id);
   const lastOdo = others.reduce((m, f) => Math.max(m, f.odometer), -Infinity);
-  const suggestion = Number.isFinite(lastOdo) ? Math.round(lastOdo + (A.stats.avgKmPerTank || 120)) : 12000;
+  const cap = data.settings.tankCapacity;
+  const ppl = A.stats.pricePerLiter;
+  const baseA = analyze({ ...data, fillUps: others, reading: null });
+  const expected = (odo) => (Number.isFinite(odo) ? expectedFill(baseA.fillUps, baseA.settings, baseA.estimate, odo) : null);
+
+  const startOdo = isEdit ? existing.odometer : knownOdometer();
+  const exStart = expected(startOdo);
+  const startLiters = isEdit ? existing.liters : exStart && exStart.liters > 0.05 ? round2(exStart.liters) : round2(cap * 0.6);
+  const startPrice = isEdit ? existing.price || 0 : ppl ? round2(startLiters * ppl) : 0;
 
   const body = `
-    <div class="list">
-      <div class="field"><label for="f-date">Datum</label><input id="f-date" type="date" value="${esc(existing ? existing.date : todayISO())}"></div>
-      <div class="field"><label for="f-odo">km-Stand</label><input id="f-odo" type="text" inputmode="decimal" autocomplete="off" placeholder="z. B. ${fOdo(suggestion)}" value="${existing ? inputNum(existing.odometer) : ''}"><span class="unit">km</span></div>
-      <div class="field"><label for="f-liters">Getankt</label><input id="f-liters" type="text" inputmode="decimal" autocomplete="off" placeholder="0,0" value="${existing ? inputNum(existing.liters) : ''}"><span class="unit">L</span></div>
+    <div class="list">${whenField('f', isEdit ? existing.date : todayISO(), isEdit ? existing.time : nowTime())}</div>
+    ${pickerHtml([
+      { key: 'odo', label: 'km-Stand', unit: 'km', fr: 1.3 },
+      { key: 'liters', label: 'Getankt', unit: 'L' },
+      { key: 'price', label: 'Betrag', unit: '€' },
+    ])}
+    <div class="list" style="margin-top:14px">
       <label class="field"><span class="field-label">Vollgetankt</span><span class="switch"><input id="f-full" type="checkbox" ${!existing || existing.full ? 'checked' : ''}><span></span></span></label>
     </div>
-    <p class="section-footer">Für eine exakte Messung bis zum Rand volltanken. Teilbetankungen werden bis zur nächsten Volltankung mitgerechnet.</p>
-    <div class="section-header">Optional</div>
-    <div class="list">
-      <div class="field"><label for="f-price">Betrag</label><input id="f-price" type="text" inputmode="decimal" autocomplete="off" placeholder="0,00" value="${existing && existing.price ? inputNum(existing.price) : ''}"><span class="unit">€</span></div>
-    </div>
+    <p class="section-footer">Für eine exakte Messung bis zum Rand volltanken. Teilbetankungen werden bis zur nächsten Volltankung mitgerechnet. Liter und Betrag folgen automatisch der Prognose, bis du sie selbst drehst.</p>
     <div class="preview" id="f-preview" aria-live="polite"></div>
     ${isEdit ? `<button class="btn btn-danger btn-block" data-sheet-action="delete" style="margin-top:28px">${icon('trash')}Tankung löschen</button>` : ''}`;
 
+  const w = {};
+  const touched = { liters: isEdit, price: isEdit || !ppl };
+
   const read = () => ({
     date: $('#f-date').value || todayISO(),
-    odometer: parseNumber($('#f-odo').value),
-    liters: parseNumber($('#f-liters').value),
+    time: $('#f-time').value,
+    odometer: w.odo.value,
+    liters: w.liters.value,
     full: $('#f-full').checked,
-    price: parseNumber($('#f-price').value),
+    price: w.price.value,
   });
 
   const evaluate = () => {
     const v = read();
-    const cap = data.settings.tankCapacity;
     const msgs = [];
     let ok = Number.isFinite(v.odometer) && v.odometer >= 0 && Number.isFinite(v.liters) && v.liters > 0;
     if (Number.isFinite(v.odometer) && others.some((f) => Math.abs(f.odometer - v.odometer) < 0.05)) {
@@ -946,15 +1014,12 @@ function openFillSheet(existing) {
     }
     if (Number.isFinite(v.odometer) && Number.isFinite(lastOdo)) {
       if (v.odometer < lastOdo) msgs.push(['warn', `Liegt vor deiner letzten Tankung (km ${fOdo(lastOdo)}) und wird chronologisch einsortiert.`]);
-      else if (v.odometer - lastOdo > 1000) msgs.push(['warn', `Über 1.000 km seit der letzten Tankung – Tippfehler?`]);
+      else if (v.odometer - lastOdo > 1000) msgs.push(['warn', 'Über 1.000 km seit der letzten Tankung – stimmt der km-Stand?']);
     }
-    if (Number.isFinite(v.price) && v.price < 0) ok = false;
 
-    // Vorschau
     let pv = '';
     if (Number.isFinite(v.odometer)) {
-      const baseA = analyze({ ...data, fillUps: others, reading: null });
-      const ex = expectedFill(baseA.fillUps, baseA.settings, baseA.estimate, v.odometer);
+      const ex = expected(v.odometer);
       if (!ex) {
         pv += `<div class="pv-row"><span class="row-icon bg-blue">${icon('sparkles')}</span><div>${v.full
           ? '<b>Startpunkt.</b> <span>Ab der nächsten Volltankung misst die App deinen Verbrauch.</span>'
@@ -971,6 +1036,8 @@ function openFillSheet(existing) {
             pv += `<div class="pv-row"><span class="row-icon bg-orange">${icon('gauge')}</span><div><b>${fC(seg.consumption)} L/100 km</b> <span>auf dieser Tankfüllung · ${diff >= 0 ? '+' : '−'}${nf(Math.abs(diff), 2, 2)} L ggü. Prognose</span></div></div>`;
           }
         }
+      } else {
+        pv += `<div class="pv-row"><span class="row-icon bg-blue">${icon('gauge')}</span><div><span>Dreh den <b>km-Stand</b> auf den aktuellen Tacho-Wert.</span></div></div>`;
       }
     }
     pv += msgs.map(([cls, text]) => `<div class="pv-msg ${cls}">${esc(text)}</div>`).join('');
@@ -979,12 +1046,26 @@ function openFillSheet(existing) {
     return ok;
   };
 
+  // Liter folgen der Prognose, Betrag folgt den Litern – solange nicht selbst gedreht.
+  const follow = () => {
+    if (!touched.liters) {
+      const ex = expected(w.odo.value);
+      if (ex && ex.kmSinceFull > 0) w.liters.set(round2(Math.min(cap * 1.4, ex.liters)));
+    }
+    if (!touched.price && ppl && Number.isFinite(w.liters.value)) w.price.set(round2(w.liters.value * ppl));
+  };
+  const update = debounced(() => {
+    follow();
+    evaluate();
+  });
+
   const save = () => {
     if (!evaluate()) return;
     const v = read();
     const entry = cleanFill({
       id: existing ? existing.id : uid(),
       date: v.date,
+      time: v.time,
       odometer: v.odometer,
       liters: v.liters,
       full: v.full,
@@ -1021,42 +1102,87 @@ function openFillSheet(existing) {
       toast('Tankung gelöscht');
     },
     onOpen: (root) => {
-      root.querySelectorAll('input').forEach((i) => i.addEventListener('input', evaluate));
+      w.odo = mountWheel(root.querySelector('[data-wheel="odo"]'), {
+        value: startOdo,
+        min: 0,
+        max: 999999,
+        step: 1,
+        span: { below: 1500, above: 3000 },
+        format: fmtKmWheel,
+        parse: parseNumber,
+        label: 'km-Stand',
+        placeholder: 'Tacho-km',
+        onChange: update,
+      });
+      w.liters = mountWheel(root.querySelector('[data-wheel="liters"]'), {
+        value: startLiters,
+        min: 0,
+        max: Math.ceil(cap * 1.4),
+        step: 0.01,
+        format: fmtL2,
+        parse: parseNumber,
+        label: 'Getankte Liter',
+        onChange: (val, { user }) => {
+          if (user) touched.liters = true;
+          update();
+        },
+      });
+      w.price = mountWheel(root.querySelector('[data-wheel="price"]'), {
+        value: startPrice,
+        min: 0,
+        max: 60,
+        step: 0.01,
+        format: fmtEurWheel,
+        parse: parseNumber,
+        label: 'Betrag in Euro',
+        onChange: (val, { user }) => {
+          if (user) touched.price = true;
+          update();
+        },
+      });
+      root.querySelectorAll('#f-date, #f-time').forEach((i) => i.addEventListener('input', evaluate));
       root.querySelector('#f-full').addEventListener('change', evaluate);
       evaluate();
-      if (!isEdit) root.querySelector('#f-odo').focus({ preventScroll: true });
+      if (startOdo == null) w.odo.focusInput();
     },
   });
 }
 
 /* ---------- 2-Takt-Öl eintragen ---------- */
 
-function knownOdometer() {
-  const odos = [...data.fillUps.map((f) => f.odometer), ...data.oil.map((e) => e.odometer)];
-  if (data.reading) odos.push(data.reading.odometer);
-  return odos.length ? Math.max(...odos) : null;
-}
-
 function openOilSheet(existing) {
   const isEdit = !!existing;
   const others = data.oil.filter((e) => !existing || e.id !== existing.id);
-  const known = knownOdometer();
   const cap = A.settings.oilCapacity;
+  const base = A.oil.estimate;
+  const est = { mean: base.mean / 1000, low: base.low / 1000, high: base.high / 1000 };
+  const expected = (odo) => (Number.isFinite(odo) ? expectedFill(others, { tankCapacity: cap }, est, odo) : null);
+
+  const startOdo = isEdit ? existing.odometer : knownOdometer();
+  const exStart = expected(startOdo);
+  const startLiters = isEdit ? existing.liters : exStart ? round2(exStart.liters) : 0.3;
+
   const body = `
-    <div class="list">
-      <div class="field"><label for="o-date">Datum</label><input id="o-date" type="date" value="${esc(existing ? existing.date : todayISO())}"></div>
-      <div class="field"><label for="o-odo">km-Stand</label><input id="o-odo" type="text" inputmode="decimal" autocomplete="off" placeholder="${known != null ? `z. B. ${fOdo(known)}` : 'km'}" value="${existing ? inputNum(existing.odometer) : ''}"><span class="unit">km</span></div>
-      <div class="field"><label for="o-liters">Nachgefüllt</label><input id="o-liters" type="text" inputmode="decimal" autocomplete="off" placeholder="0,00" value="${existing ? inputNum(existing.liters) : ''}"><span class="unit">L</span></div>
+    <div class="list">${whenField('o', isEdit ? existing.date : todayISO(), isEdit ? existing.time : nowTime())}</div>
+    ${pickerHtml([
+      { key: 'odo', label: 'km-Stand', unit: 'km', fr: 1.25 },
+      { key: 'liters', label: 'Nachgefüllt', unit: 'L' },
+    ])}
+    <div class="list" style="margin-top:14px">
       <label class="field"><span class="field-label">Bis zur Markierung</span><span class="switch"><input id="o-full" type="checkbox" ${!existing || existing.full ? 'checked' : ''}><span></span></span></label>
     </div>
-    <p class="section-footer">Nur kontrolliert und nichts nachgefüllt? <b>0</b> eintragen und „Bis zur Markierung“ ausschalten – dann startet die Kontroll-Erinnerung neu. 100 ml = 0,1 L.</p>
+    <p class="section-footer">Nur kontrolliert und nichts nachgefüllt? Auf <b>0,00</b> drehen und „Bis zur Markierung“ ausschalten – dann startet die Kontroll-Erinnerung neu. 100 ml = 0,10 L.</p>
     <div class="preview" id="o-preview" aria-live="polite"></div>
     ${isEdit ? `<button class="btn btn-danger btn-block" data-sheet-action="delete" style="margin-top:28px">${icon('trash')}Eintrag löschen</button>` : ''}`;
 
+  const w = {};
+  const touched = { liters: isEdit };
+
   const read = () => ({
     date: $('#o-date').value || todayISO(),
-    odometer: parseNumber($('#o-odo').value),
-    liters: parseNumber($('#o-liters').value),
+    time: $('#o-time').value,
+    odometer: w.odo.value,
+    liters: w.liters.value,
     full: $('#o-full').checked,
   });
 
@@ -1069,13 +1195,11 @@ function openOilSheet(existing) {
       ok = false;
     }
     if (Number.isFinite(v.liters) && v.liters > cap * 1.1) {
-      msgs.push(['warn', `Mehr als der Öltank fasst (${nf(cap, 1, 1)} L) – stimmt die Menge? 100 ml = 0,1 L.`]);
+      msgs.push(['warn', `Mehr als der Öltank fasst (${nf(cap, 1, 1)} L) – stimmt die Menge? 100 ml = 0,10 L.`]);
     }
     let pv = '';
     if (Number.isFinite(v.odometer)) {
-      const base = A.oil.estimate;
-      const est = { mean: base.mean / 1000, low: base.low / 1000, high: base.high / 1000 };
-      const ex = expectedFill(others, { tankCapacity: cap }, est, v.odometer);
+      const ex = expected(v.odometer);
       if (!ex) {
         pv += `<div class="pv-row"><span class="row-icon bg-brown">${icon('oil')}</span><div>${v.full
           ? '<b>Startpunkt.</b> <span>Ab jetzt behält die App den Ölstand im Blick.</span>'
@@ -1096,6 +1220,14 @@ function openOilSheet(existing) {
     return ok;
   };
 
+  const update = debounced(() => {
+    if (!touched.liters) {
+      const ex = expected(w.odo.value);
+      if (ex) w.liters.set(round2(Math.min(cap + 0.6, ex.liters)));
+    }
+    evaluate();
+  });
+
   openSheet({
     title: isEdit ? 'Öl-Eintrag' : '2-Takt-Öl',
     right: 'Sichern',
@@ -1107,7 +1239,9 @@ function openOilSheet(existing) {
       const before = knownOdometer();
       data.oil = [...others, entry];
       // Der km-Stand beim Ölnachfüllen ist gleichzeitig eine Tacho-Ablesung.
-      if (before == null || entry.odometer > before) data.reading = { odometer: entry.odometer, date: entry.date };
+      if (before == null || entry.odometer > before) {
+        data.reading = { odometer: entry.odometer, date: entry.date, ...(entry.time ? { time: entry.time } : {}) };
+      }
       commit();
       closeSheet();
       renderView();
@@ -1124,10 +1258,35 @@ function openOilSheet(existing) {
       toast('Eintrag gelöscht');
     },
     onOpen: (root) => {
-      root.querySelectorAll('input').forEach((i) => i.addEventListener('input', evaluate));
+      w.odo = mountWheel(root.querySelector('[data-wheel="odo"]'), {
+        value: startOdo,
+        min: 0,
+        max: 999999,
+        step: 1,
+        span: { below: 1500, above: 3000 },
+        format: fmtKmWheel,
+        parse: parseNumber,
+        label: 'km-Stand',
+        placeholder: 'Tacho-km',
+        onChange: update,
+      });
+      w.liters = mountWheel(root.querySelector('[data-wheel="liters"]'), {
+        value: startLiters,
+        min: 0,
+        max: round2(cap + 0.6),
+        step: 0.01,
+        format: fmtL2,
+        parse: parseNumber,
+        label: 'Nachgefüllte Liter',
+        onChange: (val, { user }) => {
+          if (user) touched.liters = true;
+          update();
+        },
+      });
+      root.querySelectorAll('#o-date, #o-time').forEach((i) => i.addEventListener('input', evaluate));
       root.querySelector('#o-full').addEventListener('change', evaluate);
       evaluate();
-      if (!isEdit) root.querySelector('#o-odo').focus({ preventScroll: true });
+      if (startOdo == null) w.odo.focusInput();
     },
   });
 }
@@ -1188,30 +1347,29 @@ function openReadingSheet() {
     openFillSheet();
     return;
   }
-  const current = data.reading && data.reading.odometer > last.odometer ? data.reading.odometer : null;
+  const start = Math.max(last.odometer, knownOdometer() ?? last.odometer);
   const body = `
-    <div class="list">
-      <div class="field"><label for="r-odo">km-Stand</label><input id="r-odo" type="text" inputmode="decimal" autocomplete="off" placeholder="mehr als ${fOdo(last.odometer)}" value="${current != null ? inputNum(current) : ''}"><span class="unit">km</span></div>
-      <div class="field"><label for="r-date">Datum</label><input id="r-date" type="date" value="${todayISO()}"></div>
-    </div>
-    <p class="section-footer">Einfach den Tacho ablesen – die App rechnet aus, wie viel noch im Tank ist und wie weit du noch kommst.</p>
+    <div class="list">${whenField('r', todayISO(), nowTime())}</div>
+    ${pickerHtml([{ key: 'odo', label: 'km-Stand', unit: 'km' }], true)}
+    <p class="section-footer">Einfach den Tacho ablesen und das Rad drehen – die App rechnet aus, wie viel noch im Tank ist und wie weit du noch kommst.</p>
     <div class="preview" id="r-preview" aria-live="polite"></div>`;
 
+  let wheel = null;
   const evaluate = () => {
-    const odo = parseNumber($('#r-odo').value);
+    const odo = wheel.value;
     const date = $('#r-date').value || todayISO();
-    let ok = Number.isFinite(odo) && odo > last.odometer;
+    const ok = Number.isFinite(odo) && odo > last.odometer;
     let pv = '';
     if (Number.isFinite(odo) && odo <= last.odometer) {
-      pv = `<div class="pv-msg err">Der km-Stand muss größer sein als bei der letzten Tankung (km ${fOdo(last.odometer)}).</div>`;
+      pv = `<div class="pv-row"><span class="row-icon bg-blue">${icon('gauge')}</span><div><span>Dreh auf den aktuellen Tacho-Stand – er muss über <b>km ${fOdo(last.odometer)}</b> (letzte Tankung) liegen.</span></div></div>`;
     } else if (ok) {
-      if (odo - last.odometer > 1500) pv += `<div class="pv-msg warn">Über 1.500 km seit der letzten Tankung – Tippfehler?</div>`;
       const t = analyze({ ...data, reading: { odometer: odo, date } });
       if (t.status) {
         const lv = LEVEL[t.status.level];
-        pv = `<div class="pv-row"><span class="row-icon" style="background:${lv.color}">${icon('gauge')}</span><div><b>noch ca. ${fKm(t.status.range)} km</b> <span>Reichweite (${fKm(t.status.rangeLow)}–${fKm(t.status.rangeHigh)})</span></div></div>
-          <div class="pv-row"><span class="row-icon bg-blue">${icon('drop')}</span><div><b>${nf(t.status.fuel, 1, 1)} L</b> <span>im Tank · ${Math.round(t.status.percent * 100)} %</span></div></div>${pv}`;
+        pv = `<div class="pv-row"><span class="row-icon" style="background-color:${lv.color}">${icon('gauge')}</span><div><b>noch ca. ${fKm(t.status.range)} km</b> <span>Reichweite (${fKm(t.status.rangeLow)}–${fKm(t.status.rangeHigh)})</span></div></div>
+          <div class="pv-row"><span class="row-icon bg-blue">${icon('drop')}</span><div><b>${nf(t.status.fuel, 1, 1)} L</b> <span>im Tank · ${Math.round(t.status.percent * 100)} %</span></div></div>`;
       }
+      if (odo - last.odometer > 1500) pv += '<div class="pv-msg warn">Über 1.500 km seit der letzten Tankung – stimmt der km-Stand?</div>';
     }
     $('#r-preview').innerHTML = pv;
     setSaveEnabled(ok);
@@ -1224,16 +1382,27 @@ function openReadingSheet() {
     body,
     onRight: () => {
       if (!evaluate()) return;
-      data.reading = { odometer: parseNumber($('#r-odo').value), date: $('#r-date').value || todayISO() };
+      const time = $('#r-time').value;
+      data.reading = { odometer: wheel.value, date: $('#r-date').value || todayISO(), ...(isTime(time) ? { time } : {}) };
       commit();
       closeSheet();
       renderView();
       toast('km-Stand aktualisiert');
     },
     onOpen: (root) => {
-      root.querySelectorAll('input').forEach((i) => i.addEventListener('input', evaluate));
+      wheel = mountWheel(root.querySelector('[data-wheel="odo"]'), {
+        value: start,
+        min: last.odometer,
+        max: 999999,
+        step: 1,
+        span: { below: 2000, above: 3000 },
+        format: fmtKmWheel,
+        parse: parseNumber,
+        label: 'km-Stand',
+        onChange: debounced(evaluate),
+      });
+      root.querySelectorAll('#r-date, #r-time').forEach((i) => i.addEventListener('input', evaluate));
       evaluate();
-      root.querySelector('#r-odo').focus({ preventScroll: true });
     },
   });
 }
@@ -1350,6 +1519,7 @@ function demoData() {
   let odo = 8640;
   let offset = -80;
   const price = () => 1.82 + rnd() * 0.14;
+  const time = () => `${String(7 + Math.floor(rnd() * 12)).padStart(2, '0')}:${String(Math.floor(rnd() * 60)).padStart(2, '0')}`;
   fills.push({ id: uid(), date: day(offset), odometer: odo, liters: 4.6, full: true, price: Math.round(4.6 * 1.86 * 100) / 100 });
   for (let i = 0; i < 11; i += 1) {
     const km = Math.round(118 + rnd() * 58);
@@ -1360,14 +1530,14 @@ function demoData() {
       // Teilbetankung unterwegs
       const part = 1.5;
       const partOdo = odo + Math.round(km * 0.55);
-      fills.push({ id: uid(), date: day(offset + 3), odometer: partOdo, liters: part, full: false, price: Math.round(part * price() * 100) / 100 });
+      fills.push({ id: uid(), date: day(offset + 3), time: time(), odometer: partOdo, liters: part, full: false, price: Math.round(part * price() * 100) / 100 });
       liters -= part;
     }
     if (i === 7) liters *= 0.62; // nicht ganz voll getankt → Ausreißer
     odo += km;
     offset += days;
     liters = Math.round(liters * 100) / 100;
-    fills.push({ id: uid(), date: day(Math.min(offset, -3)), odometer: odo, liters, full: true, price: Math.round(liters * price() * 100) / 100 });
+    fills.push({ id: uid(), date: day(Math.min(offset, -3)), time: time(), odometer: odo, liters, full: true, price: Math.round(liters * price() * 100) / 100 });
   }
   // 2-Takt-Öl: ca. 60 ml/100 km (Pumpe ≈ 1:45), dazwischen eine Kontrolle
   const dateAt = (o) => {
@@ -1385,7 +1555,7 @@ function demoData() {
     settings: data.settings,
     fillUps: fills,
     oil,
-    reading: { odometer: odo + 46, date: todayISO() },
+    reading: { odometer: odo + 46, date: todayISO(), time: nowTime() },
     demo: true,
     ui: data.ui,
   });
