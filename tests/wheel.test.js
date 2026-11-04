@@ -42,3 +42,11 @@ test('Gegenrichtung übernimmt keinen Schwung', () => {
   assert.equal(a.target, b.target);
   assert.ok(PHYSICS.BOOST_MAX >= 3);
 });
+
+test('Faktor pro Rad: Liter/Preis laufen weiter als km', () => {
+  const km = projectFlick(400, 30, 100000, 0, 1.3);
+  const liters = projectFlick(400, 30, 100000, 0, 3);
+  assert.ok(liters.target - 400 > (km.target - 400) * 2, `${liters.target} vs ${km.target}`);
+  // ein kräftiger Wischer bewegt die Liter um über 2 L (= 200 Cent-Zeilen)
+  assert.ok(projectFlick(0, 45, 100000, 0, 3).target >= 200);
+});

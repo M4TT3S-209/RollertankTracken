@@ -1111,6 +1111,8 @@ function openFillSheet(existing) {
         format: fmtKmWheel,
         parse: parseNumber,
         label: 'km-Stand',
+        speed: 1.3,
+        dragAccel: 0.6,
         placeholder: 'Tacho-km',
         onChange: update,
       });
@@ -1122,6 +1124,8 @@ function openFillSheet(existing) {
         format: fmtL2,
         parse: parseNumber,
         label: 'Getankte Liter',
+        speed: 3,
+        dragAccel: 2,
         onChange: (val, { user }) => {
           if (user) touched.liters = true;
           update();
@@ -1135,6 +1139,8 @@ function openFillSheet(existing) {
         format: fmtEurWheel,
         parse: parseNumber,
         label: 'Betrag in Euro',
+        speed: 3.5,
+        dragAccel: 2.2,
         onChange: (val, { user }) => {
           if (user) touched.price = true;
           update();
@@ -1267,6 +1273,8 @@ function openOilSheet(existing) {
         format: fmtKmWheel,
         parse: parseNumber,
         label: 'km-Stand',
+        speed: 1.3,
+        dragAccel: 0.6,
         placeholder: 'Tacho-km',
         onChange: update,
       });
@@ -1278,6 +1286,8 @@ function openOilSheet(existing) {
         format: fmtL2,
         parse: parseNumber,
         label: 'Nachgefüllte Liter',
+        speed: 1.6,
+        dragAccel: 1,
         onChange: (val, { user }) => {
           if (user) touched.liters = true;
           update();
@@ -1399,6 +1409,8 @@ function openReadingSheet() {
         format: fmtKmWheel,
         parse: parseNumber,
         label: 'km-Stand',
+        speed: 1.3,
+        dragAccel: 0.6,
         onChange: debounced(evaluate),
       });
       root.querySelectorAll('#r-date, #r-time').forEach((i) => i.addEventListener('input', evaluate));

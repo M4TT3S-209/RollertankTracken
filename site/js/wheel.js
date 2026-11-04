@@ -31,9 +31,12 @@ export function boost(speed) {
   return Math.min(PHYSICS.BOOST_MAX, 1 + (Math.abs(speed) / PHYSICS.BOOST_REF) ** PHYSICS.BOOST_EXP);
 }
 
-/** Wohin läuft ein Wischer aus? Gibt Zielzeile (ganzzahlig, im Bereich) und Dauer zurück. */
-export function projectFlick(pos, velocity, count, carried = 0) {
-  let v = velocity * boost(velocity);
+/**
+ * Wohin läuft ein Wischer aus? Gibt Zielzeile (ganzzahlig, im Bereich) und Dauer zurück.
+ * speed: Faktor pro Rad (z. B. Liter in Cent-Schritten brauchen mehr Weg pro Wischer).
+ */
+export function projectFlick(pos, velocity, count, carried = 0, speed = 1) {
+  let v = velocity * boost(velocity) * speed;
   if (carried && Math.sign(carried) === Math.sign(v)) v += carried * PHYSICS.CHAIN;
   const target = clamp(Math.round(pos + v / PHYSICS.LAMBDA), 0, count - 1);
   const dist = target - pos;
@@ -87,6 +90,8 @@ function tick() {
  *   label       Bezeichnung für Screenreader
  *   placeholder Text im Eingabefeld
  *   onChange    (value, {user}) → void
+ *   speed       Wurfweiten-Faktor (Standard 1)
+ *   dragAccel   Beschleunigung beim schnellen Ziehen (0 = immer 1:1)
  */
 export function mountWheel(host, o) {
   const step = o.step || 1;
@@ -205,21 +210,33 @@ export function mountWheel(host, o) {
     if (e.pointerType === 'mouse' && e.button !== 0) return;
     const wasMoving = !!anim;
     stopAnim();
-    drag = { id: e.pointerId, y0: e.clientY, p0: pos, t0: performance.now(), moved: false, wasMoving, samples: [{ t: performance.now(), p: pos }] };
+    const t = performance.now();
+    drag = {
+      id: e.pointerId, y0: e.clientY, lastY: e.clientY, lastT: t, vf: 0, raw: pos,
+      t0: t, moved: false, wasMoving, samples: [{ t, f: 0 }],
+    };
     view.setPointerCapture(e.pointerId);
   });
 
   view.addEventListener('pointermove', (e) => {
     if (!drag || e.pointerId !== drag.id) return;
-    const dy = e.clientY - drag.y0;
-    if (Math.abs(dy) > 4) drag.moved = true;
-    let p = drag.p0 - dy / ROW;
+    const now = performance.now();
+    if (Math.abs(e.clientY - drag.y0) > 4) drag.moved = true;
+    const step = e.clientY - drag.lastY;
+    const dt = Math.max(1, now - drag.lastT);
+    drag.lastY = e.clientY;
+    drag.lastT = now;
+    // Schnelles Ziehen beschleunigt (wie ein Mauszeiger), langsames bleibt 1:1
+    drag.vf = drag.vf * 0.6 + ((Math.abs(step) / dt) * 1000) * 0.4;
+    const gain = 1 + (o.dragAccel || 0) * clamp((drag.vf - 250) / 500, 0, 4);
+    drag.raw -= (step / ROW) * gain;
+    let p = drag.raw;
     // Gummiband an den Enden
     if (p < 0) p = -((-p) ** 0.7) * 0.6;
     else if (p > count - 1) p = count - 1 + ((p - (count - 1)) ** 0.7) * 0.6;
     place(p);
-    const now = performance.now();
-    drag.samples.push({ t: now, p });
+    // für die Wurf-Geschwindigkeit zählt die reine Fingerbewegung
+    drag.samples.push({ t: now, f: -(e.clientY - drag.y0) / ROW });
     while (drag.samples.length > 2 && now - drag.samples[0].t > 100) drag.samples.shift();
   });
 
@@ -250,7 +267,7 @@ export function mountWheel(host, o) {
     if (s.length >= 2 && now - last.t < 80) {
       let first = s[s.length - 2];
       for (let i = s.length - 2; i >= 0 && last.t - s[i].t <= 50; i -= 1) first = s[i];
-      if (last.t - first.t > 4) v = ((last.p - first.p) / (last.t - first.t)) * 1000;
+      if (last.t - first.t > 4) v = ((last.f - first.f) / (last.t - first.t)) * 1000;
     }
     host.dataset.flickV = v.toFixed(1); // hilft beim Testen
     if (pos < 0 || pos > count - 1 || Math.abs(v) < PHYSICS.MIN_FLICK) {
@@ -258,7 +275,7 @@ export function mountWheel(host, o) {
       return;
     }
     const keep = now - carriedAt < 600 ? carried : 0;
-    const f = projectFlick(pos, v, count, keep);
+    const f = projectFlick(pos, v, count, keep, o.speed || 1);
     animateTo(f.target, f.duration, f.velocity);
   };
   view.addEventListener('pointerup', endDrag);
